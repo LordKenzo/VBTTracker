@@ -10,13 +10,22 @@ import CoreBluetooth
 import Combine
 
 class BLEManager: NSObject, ObservableObject, SensorDataProvider {
-    
+
     // MARK: - Published Properties
     @Published var isScanning = false
     @Published var isConnected = false
     @Published var discoveredDevices: [CBPeripheral] = []
     @Published var statusMessage = "Pronto per la scansione"
     @Published var sensorName = "Non connesso"
+    
+    // Calibrazione
+    @Published var currentCalibration: CalibrationData?
+    @Published var isCalibrated = false
+   
+    // Dati raw (prima della calibrazione)
+    private var rawAcceleration: [Double] = [0.0, 0.0, 0.0]
+    private var rawAngularVelocity: [Double] = [0.0, 0.0, 0.0]
+    private var rawAngles: [Double] = [0.0, 0.0, 0.0]
     
     @Published var acceleration: [Double] = [0.0, 0.0, 0.0]
     @Published var angularVelocity: [Double] = [0.0, 0.0, 0.0]
@@ -102,6 +111,18 @@ class BLEManager: NSObject, ObservableObject, SensorDataProvider {
         print("ℹ️ Scansione fermata - Trovati \(discoveredDevices.count) dispositivi")
     }
     
+    func applyCalibration(_ calibration: CalibrationData) {
+        self.currentCalibration = calibration
+        self.isCalibrated = true
+        print("✅ Calibrazione applicata al BLEManager")
+    }
+    
+    func removeCalibration() {
+        self.currentCalibration = nil
+        self.isCalibrated = false
+        print("🔄 Calibrazione rimossa")
+    }
+    
     // MARK: - Data Parsing
     
     private func parseWitMotionPacket(_ data: Data) {
@@ -133,25 +154,45 @@ class BLEManager: NSObject, ObservableObject, SensorDataProvider {
         let pitchRaw = Int16(bytes[17]) << 8 | Int16(bytes[16])
         let yawRaw = Int16(bytes[19]) << 8 | Int16(bytes[18])
         
-        // Converti con scale corrette
+        // Converti con scale corrette (dati RAW)
+        rawAcceleration = [
+            Double(axRaw) / 32768.0 * 16.0,
+            Double(ayRaw) / 32768.0 * 16.0,
+            Double(azRaw) / 32768.0 * 16.0
+        ]
+        
+        rawAngularVelocity = [
+            Double(gxRaw) / 32768.0 * 2000.0,
+            Double(gyRaw) / 32768.0 * 2000.0,
+            Double(gzRaw) / 32768.0 * 2000.0
+        ]
+        
+        rawAngles = [
+            Double(rollRaw) / 32768.0 * 180.0,
+            Double(pitchRaw) / 32768.0 * 180.0,
+            Double(yawRaw) / 32768.0 * 180.0
+        ]
+        
+        // ⭐ Applica calibrazione se presente
+        var finalAcceleration = rawAcceleration
+        var finalAngularVelocity = rawAngularVelocity
+        var finalAngles = rawAngles
+        
+        if let calibration = currentCalibration {
+            let calibrated = calibration.applyCalibration(
+                acceleration: rawAcceleration,
+                angularVelocity: rawAngularVelocity,
+                angles: rawAngles
+            )
+            finalAcceleration = calibrated.acceleration
+            finalAngularVelocity = calibrated.angularVelocity
+            finalAngles = calibrated.angles
+        }
+        
         DispatchQueue.main.async {
-            self.acceleration = [
-                Double(axRaw) / 32768.0 * 16.0,
-                Double(ayRaw) / 32768.0 * 16.0,
-                Double(azRaw) / 32768.0 * 16.0
-            ]
-            
-            self.angularVelocity = [
-                Double(gxRaw) / 32768.0 * 2000.0,
-                Double(gyRaw) / 32768.0 * 2000.0,
-                Double(gzRaw) / 32768.0 * 2000.0
-            ]
-            
-            self.angles = [
-                Double(rollRaw) / 32768.0 * 180.0,
-                Double(pitchRaw) / 32768.0 * 180.0,
-                Double(yawRaw) / 32768.0 * 180.0
-            ]
+            self.acceleration = finalAcceleration
+            self.angularVelocity = finalAngularVelocity
+            self.angles = finalAngles
         }
     }
 }
