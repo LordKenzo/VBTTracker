@@ -8,11 +8,13 @@
 
 /* Begin PBXBuildFile section */
 		3E0D11582EA1111B00DAAE09 /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = 3E0D11562EA1111600DAAE09 /* README.md */; };
+		3E4A731F2EA11CA000084173 /* changelog.md in Resources */ = {isa = PBXBuildFile; fileRef = 3E4A731E2EA11C9A00084173 /* changelog.md */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		3E0D11202EA1102300DAAE09 /* VBTTracker.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = VBTTracker.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		3E0D11562EA1111600DAAE09 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
+		3E4A731E2EA11C9A00084173 /* changelog.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = changelog.md; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -40,6 +42,7 @@
 				3E0D11222EA1102300DAAE09 /* VBTTracker */,
 				3E0D11212EA1102300DAAE09 /* Products */,
 				3E0D11562EA1111600DAAE09 /* README.md */,
+				3E4A731E2EA11C9A00084173 /* changelog.md */,
 			);
 			sourceTree = "<group>";
 		};
@@ -116,6 +119,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				3E0D11582EA1111B00DAAE09 /* README.md in Resources */,
+				3E4A731F2EA11CA000084173 /* changelog.md in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

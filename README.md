@@ -33,6 +33,13 @@ VBTTracker/
 - ✅ Feedback in tempo reale
 - ✅ Salvataggio della sessione di lavoro
 
+## 🛠️ Tech Stack
+
+- Swift 5.9+
+- SwiftUI
+- CoreBluetooth
+- iOS 16.0+
+
 ## 📊 Specifiche Tecniche
 - **Service UUID**: `0000FFE5-0000-1000-8000-00805F9A34FB`
 - **Characteristic UUID**: `0000FFE4-0000-1000-8000-00805F9A34FB`
