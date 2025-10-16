@@ -9,6 +9,7 @@ import SwiftUI
 
 struct SensorConnectionView: View {
     @StateObject private var bleManager = BLEManager()
+    @StateObject private var calibrationManager = CalibrationManager() // ⭐ NUOVO
     
     var body: some View {
         NavigationStack {
@@ -40,8 +41,25 @@ struct SensorConnectionView: View {
                 .frame(width: 12, height: 12)
             
             VStack(alignment: .leading, spacing: 4) {
-                Text(bleManager.sensorName)
-                    .font(.headline)
+                HStack(spacing: 8) {
+                    Text(bleManager.sensorName)
+                        .font(.headline)
+                    
+                    // ⭐ NUOVO: Badge calibrazione
+                    if bleManager.isCalibrated {
+                        HStack(spacing: 4) {
+                            Image(systemName: "checkmark.seal.fill")
+                                .font(.caption2)
+                            Text("Calibrato")
+                                .font(.caption2)
+                        }
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.green)
+                        .cornerRadius(8)
+                    }
+                }
                 
                 Text(bleManager.statusMessage)
                     .font(.caption)
@@ -121,17 +139,39 @@ struct SensorConnectionView: View {
     // MARK: - Control Section
     
     private var controlSection: some View {
-        VStack(spacing: 12) {
-            if bleManager.isConnected {
-                // Pulsante Disconnetti
-                Button(action: { bleManager.disconnect() }) {
-                    Label("Disconnetti Sensore", systemImage: "xmark.circle.fill")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .tint(.red)
-                .controlSize(.large)
-            } else {
+            VStack(spacing: 12) {
+                if bleManager.isConnected {
+                    // Pulsante Disconnetti
+                    Button(action: { bleManager.disconnect() }) {
+                        Label("Disconnetti Sensore", systemImage: "xmark.circle.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.red)
+                    .controlSize(.large)
+                    
+                    // ⭐ MODIFICATO: Usa il calibrationManager condiviso
+                    NavigationLink(destination: CalibrationView(
+                        calibrationManager: calibrationManager,  // ← Usa @StateObject
+                        sensorManager: bleManager
+                    )) {
+                        Label("Calibra Sensore", systemImage: "sensor.tag.radiowaves.forward.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    if bleManager.isCalibrated {
+                            Button(action: {
+                                bleManager.removeCalibration()
+                                calibrationManager.resetCalibration()
+                            }) {
+                                Label("Rimuovi Calibrazione", systemImage: "trash.fill")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(.orange)
+                        }
+                    
+                } else {
                 // Pulsante Scansione
                 Button(action: { bleManager.startScanning() }) {
                     HStack {
