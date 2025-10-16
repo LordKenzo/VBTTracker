@@ -160,16 +160,23 @@ struct SensorConnectionView: View {
                     }
                     .buttonStyle(.bordered)
                     if bleManager.isCalibrated {
-                            Button(action: {
-                                bleManager.removeCalibration()
-                                calibrationManager.resetCalibration()
-                            }) {
-                                Label("Rimuovi Calibrazione", systemImage: "trash.fill")
-                                    .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(.bordered)
-                            .tint(.orange)
-                        }
+                    Button(action: {
+                        bleManager.removeCalibration()
+                        calibrationManager.resetCalibration()
+                    }) {
+                        Label("Rimuovi Calibrazione", systemImage: "trash.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.orange)
+                    // Test Velocità
+                    NavigationLink(destination: VelocityTestView(sensorManager: bleManager)) {
+                        Label("Test Calcolo Velocità", systemImage: "gauge.high")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.purple)
+                }
                     
                 } else {
                 // Pulsante Scansione
