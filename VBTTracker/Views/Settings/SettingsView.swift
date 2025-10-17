@@ -94,6 +94,49 @@ struct SettingsView: View {
                     Text("10-20%: ottimale per forza\n20-40%: ipertrofia")
                 }
                 
+                // MARK: - Rep Detection Section
+                Section {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("Velocità Minima Movimento")
+                            Spacer()
+                            Text(String(format: "%.2f m/s", settings.repMinVelocity))
+                                .foregroundStyle(.secondary)
+                        }
+                        
+                        Slider(value: $settings.repMinVelocity, in: 0.05...0.20, step: 0.01)
+                            .tint(.blue)
+                    }
+                    
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("Velocità Minima Picco")
+                            Spacer()
+                            Text(String(format: "%.2f m/s", settings.repMinPeakVelocity))
+                                .foregroundStyle(.secondary)
+                        }
+                        
+                        Slider(value: $settings.repMinPeakVelocity, in: 0.10...0.30, step: 0.01)
+                            .tint(.blue)
+                    }
+                    
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("Accelerazione Minima")
+                            Spacer()
+                            Text(String(format: "%.1f m/s²", settings.repMinAcceleration))
+                                .foregroundStyle(.secondary)
+                        }
+                        
+                        Slider(value: $settings.repMinAcceleration, in: 1.0...5.0, step: 0.5)
+                            .tint(.blue)
+                    }
+                } header: {
+                    Text("Sensibilità Rilevamento")
+                } footer: {
+                    Text("Valori più bassi = più sensibile (conta anche reps lente)\nValori più alti = meno sensibile (solo reps veloci)")
+                }
+                
                 // MARK: - Audio Feedback Section
                 Section {
                     Toggle(isOn: $settings.voiceFeedbackEnabled) {

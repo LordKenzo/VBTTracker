@@ -54,6 +54,17 @@ class SettingsManager: ObservableObject {
         didSet { saveCalibration() }
     }
     
+    // Rep Detection Sensitivity
+    @Published var repMinVelocity: Double {
+        didSet { save() }
+    }
+    @Published var repMinPeakVelocity: Double {
+        didSet { save() }
+    }
+    @Published var repMinAcceleration: Double {
+        didSet { save() }
+    }
+    
     // MARK: - UserDefaults Keys
     
     private enum Keys {
@@ -67,6 +78,9 @@ class SettingsManager: ObservableObject {
         static let lastSensorMAC = "lastSensorMAC"
         static let lastSensorName = "lastSensorName"
         static let calibrationData = "calibrationData"
+        static let repMinVelocity = "repMinVelocity"
+        static let repMinPeakVelocity = "repMinPeakVelocity"
+        static let repMinAcceleration = "repMinAcceleration"
     }
     
     // MARK: - Initialization
@@ -83,6 +97,15 @@ class SettingsManager: ObservableObject {
         let loadedMAC = UserDefaults.standard.string(forKey: Keys.lastSensorMAC)
         let loadedName = UserDefaults.standard.string(forKey: Keys.lastSensorName)
         let loadedCalibration = SettingsManager.loadCalibration()
+        
+        // Rep Sensitivity
+        let loadedMinVel = UserDefaults.standard.double(forKey: Keys.repMinVelocity)
+        let loadedMinPeak = UserDefaults.standard.double(forKey: Keys.repMinPeakVelocity)
+        let loadedMinAccel = UserDefaults.standard.double(forKey: Keys.repMinAcceleration)
+
+        repMinVelocity = loadedMinVel == 0 ? 0.10 : loadedMinVel
+        repMinPeakVelocity = loadedMinPeak == 0 ? 0.15 : loadedMinPeak
+        repMinAcceleration = loadedMinAccel == 0 ? 2.5 : loadedMinAccel
         
         // Ora assegna tutto
         velocityRanges = loadedRanges
@@ -106,6 +129,11 @@ class SettingsManager: ObservableObject {
         if let encoded = try? JSONEncoder().encode(velocityRanges) {
             UserDefaults.standard.set(encoded, forKey: Keys.velocityRanges)
         }
+        
+        // Rep Sensitivity
+        UserDefaults.standard.set(repMinVelocity, forKey: Keys.repMinVelocity)
+        UserDefaults.standard.set(repMinPeakVelocity, forKey: Keys.repMinPeakVelocity)
+        UserDefaults.standard.set(repMinAcceleration, forKey: Keys.repMinAcceleration)
         
         // Velocity Loss
         UserDefaults.standard.set(velocityLossThreshold, forKey: Keys.velocityLossThreshold)
@@ -159,6 +187,9 @@ class SettingsManager: ObservableObject {
         voiceFeedbackEnabled = true
         voiceVolume = 0.7
         voiceRate = 0.5
+        repMinVelocity = 0.10
+        repMinPeakVelocity = 0.15
+        repMinAcceleration = 2.5
         voiceLanguage = "it-IT"
         print("🔄 Impostazioni resettate ai valori predefiniti")
     }

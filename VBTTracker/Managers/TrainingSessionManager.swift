@@ -48,7 +48,7 @@ class TrainingSessionManager: ObservableObject {
     
     // Constants
     private let dt: Double = 0.02 // 20ms sampling
-    private let movementThreshold: Double = 2.5 // m/s²
+    // private let movementThreshold: Double = 2.5 // m/s²
     
     enum MovementPhase {
         case idle
@@ -91,7 +91,8 @@ class TrainingSessionManager: ObservableObject {
         let accelMS2 = accelNoGravity * 9.81
         
         // 2. Detect movement start
-        let movementDetected = abs(accelMS2) > movementThreshold
+        let minAccel = SettingsManager.shared.repMinAcceleration
+        let movementDetected = abs(accelMS2) > minAccel
         
         if movementDetected && !isMoving {
             // 🟢 START MOVEMENT
@@ -110,8 +111,8 @@ class TrainingSessionManager: ObservableObject {
             
             // 4. Phase detection and rep counting
             
-            // CONCENTRIC PHASE (upward, velocity > 0.08 m/s)
-            if velocity > 0.08 {
+            let minVel = SettingsManager.shared.repMinVelocity
+            if velocity > minVel {
                 if !inConcentricPhase {
                     inConcentricPhase = true
                     concentricPeakReached = false
@@ -127,7 +128,8 @@ class TrainingSessionManager: ObservableObject {
             
             // Peak detection: velocity starts decreasing after concentric phase
             if inConcentricPhase && !concentricPeakReached {
-                if previousVelocity > velocity && peakVelocity > 0.12 {
+                let minPeak = SettingsManager.shared.repMinPeakVelocity
+                if previousVelocity > velocity && peakVelocity > minPeak {
                     concentricPeakReached = true
                     
                     // Update current zone based on peak velocity
