@@ -180,6 +180,7 @@ struct CalibrationView: View {
                     // ⭐ SALVA calibrazione nel BLEManager
                     if let calibration = calibrationManager.currentCalibration {
                         sensorManager.applyCalibration(calibration)
+                        SettingsManager.shared.savedCalibration = calibration
                     }
                     dismiss()
                 }) {

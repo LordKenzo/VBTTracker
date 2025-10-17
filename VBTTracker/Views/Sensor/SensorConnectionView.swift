@@ -160,16 +160,17 @@ struct SensorConnectionView: View {
                     }
                     .buttonStyle(.bordered)
                     if bleManager.isCalibrated {
-                            Button(action: {
-                                bleManager.removeCalibration()
-                                calibrationManager.resetCalibration()
-                            }) {
-                                Label("Rimuovi Calibrazione", systemImage: "trash.fill")
-                                    .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(.bordered)
-                            .tint(.orange)
-                        }
+                    Button(action: {
+                        bleManager.removeCalibration()
+                        calibrationManager.resetCalibration()
+                    }) {
+                        Label("Rimuovi Calibrazione", systemImage: "trash.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.orange)
+
+                }
                     
                 } else {
                 // Pulsante Scansione
