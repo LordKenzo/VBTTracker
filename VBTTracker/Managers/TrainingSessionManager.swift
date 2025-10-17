@@ -29,6 +29,9 @@ class TrainingSessionManager: ObservableObject {
     @Published var repCount: Int = 0
     @Published var currentZone: TrainingZone = .tooSlow
     
+    @Published var lastRepInTarget: Bool = true
+    @Published var lastRepPeakVelocity: Double = 0.0
+    
     var targetZone: TrainingZone = .strength
     
     // MARK: - Private Properties
@@ -212,13 +215,42 @@ class TrainingSessionManager: ObservableObject {
             firstRepPeakVelocity = peakVelocity
         }
         
+        let isInTarget = checkIfInTarget(velocity: peakVelocity)
+        
         DispatchQueue.main.async {
             self.repCount += 1
+            self.lastRepPeakVelocity = peakVelocity
+            self.lastRepInTarget = isInTarget
             self.calculateMeanVelocity()
             self.calculateVelocityLoss()
         }
         
-        print("✅ RIPETIZIONE #\(repCount + 1) completata - Peak: \(String(format: "%.3f", peakVelocity)) m/s")
+        let emoji = isInTarget ? "✅" : "⚠️"
+        print("\(emoji) RIPETIZIONE #\(repCount + 1) completata - Peak: \(String(format: "%.3f", peakVelocity)) m/s - \(isInTarget ? "IN TARGET" : "FUORI TARGET")")
+    }
+
+    // Helper method
+    private func checkIfInTarget(velocity: Double) -> Bool {
+        let targetRange = getRangeForTargetZone()
+        return targetRange.contains(velocity)
+    }
+
+    private func getRangeForTargetZone() -> ClosedRange<Double> {
+        let ranges = SettingsManager.shared.velocityRanges
+        switch targetZone {
+        case .maxStrength:
+            return ranges.maxStrength
+        case .strength:
+            return ranges.strength
+        case .strengthSpeed:
+            return ranges.strengthSpeed
+        case .speed:
+            return ranges.speed
+        case .maxSpeed:
+            return ranges.maxSpeed
+        case .tooSlow:
+            return 0.0...0.15
+        }
     }
     
     private func calculateMeanVelocity() {

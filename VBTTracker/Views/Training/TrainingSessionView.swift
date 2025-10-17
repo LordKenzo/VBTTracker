@@ -32,9 +32,7 @@ struct TrainingSessionView: View {
             LinearGradient(
                 colors: [
                     sessionManager.currentZone.color.opacity(0.2),
-
                     sessionManager.currentZone.color.opacity(0.05),
-
                 ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
@@ -59,7 +57,23 @@ struct TrainingSessionView: View {
                 controlButtons
             }
             .padding()
-        }
+            
+            // TOAST NOTIFICATION
+            if sessionManager.repCount > 0 && sessionManager.isRecording {
+                VStack {
+                    Spacer()
+                    
+                    RepToastView(
+                        repNumber: sessionManager.repCount,
+                        velocity: sessionManager.lastRepPeakVelocity,
+                        isInTarget: sessionManager.lastRepInTarget
+                    )
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .animation(.spring(response: 0.5, dampingFraction: 0.7), value: sessionManager.repCount)
+                    .padding(.bottom, 100)
+                }
+            }
+        }  // CHIUSURA ZSTACK
         .navigationTitle("Allenamento")
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(sessionManager.isRecording)
@@ -137,55 +151,82 @@ struct TrainingSessionView: View {
     
     private var currentMetricsCard: some View {
         VStack(spacing: 16) {
-            // Current Zone Indicator
-            HStack {
-                Circle()
-                    .fill(sessionManager.currentZone.color)
-                    .frame(width: 12, height: 12)
+            // Banner Zona Corrente EVIDENTE
+            HStack(spacing: 12) {
+                Image(systemName: sessionManager.currentZone.icon)
+                    .font(.title)
+                    .foregroundStyle(.white)
                 
-                Text("Zona Attuale: \(sessionManager.currentZone.rawValue)")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                
-                Spacer()
-            }
-            
-            // Velocity Display
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text(String(format: "%.3f", sessionManager.currentVelocity))
-                    .font(.system(size: 48, weight: .bold, design: .rounded))
-                    .foregroundStyle(sessionManager.currentZone.color)
-                
-                Text("m/s")
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
-            }
-            
-            // Peak Velocity
-            HStack {
-                Text("Velocità Picco")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                
-                Spacer()
-                
-                Text(String(format: "%.3f m/s", sessionManager.peakVelocity))
-                    .font(.headline)
-                    .foregroundStyle(.purple)
-            }
-            
-            // Mean Velocity (if reps > 0)
-            if sessionManager.repCount > 0 {
-                HStack {
-                    Text("Velocità Media")
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("ZONA ATTUALE")
                         .font(.caption)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.white.opacity(0.8))
+                    
+                    Text(sessionManager.currentZone.rawValue.uppercased())
+                        .font(.title2)
+                        .fontWeight(.bold)
+                        .foregroundStyle(.white)
+                }
+                
+                Spacer()
+                
+                // Indicatore animato
+                Circle()
+                    .fill(.white)
+                    .frame(width: 12, height: 12)
+                    .opacity(sessionManager.currentVelocity > 0.1 ? 1.0 : 0.3)
+                    .animation(.easeInOut(duration: 0.5).repeatForever(), value: sessionManager.currentVelocity)
+            }
+            .padding()
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(sessionManager.currentZone.color)
+            )
+            .shadow(color: sessionManager.currentZone.color.opacity(0.5), radius: 8, x: 0, y: 4)
+            
+            // Velocity Display con colore dinamico
+            VStack(spacing: 8) {
+                Text("VELOCITÀ")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.secondary)
+                
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text(String(format: "%.3f", sessionManager.currentVelocity))
+                        .font(.system(size: 56, weight: .bold, design: .rounded))
+                        .foregroundStyle(sessionManager.currentZone.color)
+                        .animation(.easeOut(duration: 0.2), value: sessionManager.currentVelocity)
+                    
+                    Text("m/s")
+                        .font(.title2)
                         .foregroundStyle(.secondary)
-                    
-                    Spacer()
-                    
-                    Text(String(format: "%.3f m/s", sessionManager.meanVelocity))
-                        .font(.headline)
-                        .foregroundStyle(.blue)
+                }
+            }
+            .padding()
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(sessionManager.currentZone.color.opacity(0.1))
+            )
+            
+            // Stats Grid
+            HStack(spacing: 12) {
+                // Peak Velocity
+                StatCard(
+                    title: "PICCO",
+                    value: String(format: "%.3f", sessionManager.peakVelocity),
+                    unit: "m/s",
+                    color: .purple
+                )
+                
+                // Mean Velocity (if reps > 0)
+                if sessionManager.repCount > 0 {
+                    StatCard(
+                        title: "MEDIA",
+                        value: String(format: "%.3f", sessionManager.meanVelocity),
+                        unit: "m/s",
+                        color: .blue
+                    )
                 }
             }
             
@@ -193,36 +234,56 @@ struct TrainingSessionView: View {
             if settings.stopOnVelocityLoss && sessionManager.repCount > 1 {
                 VStack(spacing: 8) {
                     HStack {
-                        Text("Velocity Loss")
+                        Text("VELOCITY LOSS")
                             .font(.caption)
+                            .fontWeight(.semibold)
                             .foregroundStyle(.secondary)
                         
                         Spacer()
                         
                         Text(String(format: "%.1f%%", sessionManager.velocityLoss))
-                            .font(.headline)
+                            .font(.title3)
+                            .fontWeight(.bold)
                             .foregroundStyle(velocityLossColor)
                     }
                     
-                    // Progress bar
+                    // Progress bar migliorata
                     GeometryReader { geometry in
                         ZStack(alignment: .leading) {
-                            Rectangle()
+                            // Background
+                            RoundedRectangle(cornerRadius: 6)
                                 .fill(Color(.systemGray5))
-                                .frame(height: 8)
-                                .cornerRadius(4)
+                                .frame(height: 12)
                             
-                            Rectangle()
-                                .fill(velocityLossColor)
+                            // Progress
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(
+                                    LinearGradient(
+                                        colors: [velocityLossColor, velocityLossColor.opacity(0.7)],
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    )
+                                )
                                 .frame(
                                     width: min(geometry.size.width * (sessionManager.velocityLoss / settings.velocityLossThreshold), geometry.size.width),
-                                    height: 8
+                                    height: 12
                                 )
-                                .cornerRadius(4)
+                                .animation(.easeOut(duration: 0.3), value: sessionManager.velocityLoss)
+                            
+                            // Threshold marker
+                            Rectangle()
+                                .fill(.white)
+                                .frame(width: 2, height: 16)
+                                .position(x: geometry.size.width, y: 6)
                         }
                     }
-                    .frame(height: 8)
+                    .frame(height: 12)
                 }
+                .padding()
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(velocityLossColor.opacity(0.1))
+                )
             }
         }
         .padding()
@@ -234,19 +295,37 @@ struct TrainingSessionView: View {
     // MARK: - Reps Counter Card
     
     private var repsCounterCard: some View {
-        HStack {
+        HStack(spacing: 16) {
             Image(systemName: "figure.strengthtraining.traditional")
                 .font(.system(size: 50))
                 .foregroundStyle(.blue)
             
             VStack(alignment: .leading, spacing: 4) {
-                Text("Ripetizioni")
+                Text("RIPETIZIONI")
                     .font(.caption)
+                    .fontWeight(.semibold)
                     .foregroundStyle(.secondary)
                 
-                Text("\(sessionManager.repCount)")
-                    .font(.system(size: 56, weight: .bold, design: .rounded))
-                    .foregroundStyle(.blue)
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text("\(sessionManager.repCount)")
+                        .font(.system(size: 56, weight: .bold, design: .rounded))
+                        .foregroundStyle(.blue)
+                    
+                    // ⭐ NUOVO: Indicatore ultima rep
+                    if sessionManager.repCount > 0 {
+                        VStack(spacing: 4) {
+                            Image(systemName: sessionManager.lastRepInTarget ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                .font(.title)
+                                .foregroundStyle(sessionManager.lastRepInTarget ? .green : .orange)
+                                .symbolEffect(.bounce, value: sessionManager.repCount)
+                            
+                            Text(sessionManager.lastRepInTarget ? "IN TARGET" : "FUORI TARGET")
+                                .font(.caption2)
+                                .fontWeight(.bold)
+                                .foregroundStyle(sessionManager.lastRepInTarget ? .green : .orange)
+                        }
+                    }
+                }
             }
             
             Spacer()
@@ -349,6 +428,91 @@ struct TrainingSessionView: View {
     private func stopDataStream() {
         dataStreamTimer?.invalidate()
         dataStreamTimer = nil
+    }
+}
+
+// MARK: - Supporting Views
+
+struct StatCard: View {
+    let title: String
+    let value: String
+    let unit: String
+    let color: Color
+    
+    var body: some View {
+        VStack(spacing: 4) {
+            Text(title)
+                .font(.caption2)
+                .fontWeight(.semibold)
+                .foregroundStyle(.secondary)
+            
+            HStack(alignment: .firstTextBaseline, spacing: 2) {
+                Text(value)
+                    .font(.title3)
+                    .fontWeight(.bold)
+                    .foregroundStyle(color)
+                
+                Text(unit)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding()
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(color.opacity(0.1))
+        )
+    }
+}
+
+// MARK: - Rep Toast View
+
+struct RepToastView: View {
+    let repNumber: Int
+    let velocity: Double
+    let isInTarget: Bool
+    
+    @State private var isVisible = true
+    
+    var body: some View {
+        if isVisible {
+            HStack(spacing: 12) {
+                Image(systemName: isInTarget ? "checkmark.circle.fill" : "xmark.circle.fill")
+                    .font(.title2)
+                    .foregroundStyle(.white)
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("REP #\(repNumber)")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.white.opacity(0.8))
+                    
+                    Text(String(format: "%.3f m/s", velocity))
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                }
+                
+                Text(isInTarget ? "✓" : "✗")
+                    .font(.title)
+                    .fontWeight(.bold)
+                    .foregroundStyle(.white)
+            }
+            .padding()
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(isInTarget ? Color.green : Color.orange)
+                    .shadow(color: (isInTarget ? Color.green : Color.orange).opacity(0.5), radius: 10)
+            )
+            .onAppear {
+                // Auto-hide dopo 2 secondi
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                    withAnimation {
+                        isVisible = false
+                    }
+                }
+            }
+        }
     }
 }
 
