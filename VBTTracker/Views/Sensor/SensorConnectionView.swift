@@ -169,13 +169,7 @@ struct SensorConnectionView: View {
                     }
                     .buttonStyle(.bordered)
                     .tint(.orange)
-                    // Test Velocità
-                    NavigationLink(destination: VelocityTestView(sensorManager: bleManager)) {
-                        Label("Test Calcolo Velocità", systemImage: "gauge.high")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(.purple)
+
                 }
                     
                 } else {
