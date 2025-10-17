@@ -60,3 +60,13 @@ VBT Tracker richiede Bluetooth per connettersi al sensore WitMotion
 Privacy - Bluetooth Peripheral Usage Description
 Connessione al sensore inerziale per misurare velocità e accelerazione
 ```
+
+## 📚 Riferimenti Scientifici
+
+- González-Badillo, J. J., & Sánchez-Medina, L. (2010). Movement velocity as a measure of loading intensity in resistance training. *International Journal of Sports Medicine, 31*(5), 347-352.
+- Pareja-Blanco, F., et al. (2017). Effects of velocity loss during resistance training on athletic performance, strength gains and muscle adaptations. *Scandinavian Journal of Medicine & Science in Sports, 27*(7), 724-735.
+- Conceição, F., et al. (2016). Movement velocity as a measure of exercise intensity in three lower limb exercises. *Journal of Sports Sciences, 34*(12), 1099-1106.
+
+## 👨‍💻 Autore
+
+Lorenzo Franceschini - Tesi di Laurea
