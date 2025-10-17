@@ -341,6 +341,23 @@ struct VelocityTestView: View {
     private func startDataStream() {
         dataStreamTimer = Timer.scheduledTimer(withTimeInterval: dt, repeats: true) { _ in
             calculateVelocityVBT()
+            if velocity > 0 {
+                // Stima % 1RM
+                if let rmPercent = VBTReferenceData.estimateRM(
+                    velocity: velocity,
+                    exercise: .benchPress
+                ) {
+                    print("📊 Velocità \(velocity) m/s → ~\(rmPercent)% 1RM")
+                }
+                
+                // Determina zona
+                if let zone = VBTReferenceData.getLoadZone(
+                    velocity: velocity,
+                    exercise: .benchPress
+                ) {
+                    print("🎯 Zona: \(zone.displayName)")
+                }
+            }
         }
     }
     
