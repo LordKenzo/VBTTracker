@@ -66,6 +66,61 @@ struct SettingsView: View {
                     Text("Valori predefiniti da letteratura scientifica (panca piana)")
                 }
                 
+                // MARK: - Velocity Measurement Mode Section
+
+                Section {
+                    Picker("Modalità Misurazione", selection: $settings.velocityMeasurementMode) {
+                        Text("Solo Concentrica").tag(VBTRepDetector.VelocityMeasurementMode.concentricOnly)
+                        Text("ROM Completo").tag(VBTRepDetector.VelocityMeasurementMode.fullROM)
+                    }
+                    .pickerStyle(.segmented)
+                    
+                } header: {
+                    Text("Misurazione Velocità")
+                } footer: {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(footerText)
+                        
+                        Divider()
+                        
+                        Text("📚 Letteratura Scientifica:")
+                            .font(.caption2)
+                            .fontWeight(.semibold)
+                        
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("• González-Badillo & Sánchez-Medina (2010): MPV solo concentrica")
+                            Text("• Pareja-Blanco et al. (2017): Velocity loss su fase propulsiva")
+                            Text("• Banyard et al. (2019): Standard VBT = concentrica only")
+                        }
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    }
+                }
+
+                // MARK: - Computed Property per Footer
+
+                var footerText: String {
+                    switch settings.velocityMeasurementMode {
+                    case .concentricOnly:
+                        return """
+                        Standard VBT: Misura velocità SOLO nella fase concentrica (salita/spinta).
+                        Più accurato per valutare la potenza esplosiva.
+                        
+                        Esempio: Panca piana
+                        • Eccentrica (discesa): ignora
+                        • Concentrica (salita): misura velocità ✅
+                        """
+                    case .fullROM:
+                        return """
+                        ROM Completo: Misura velocità su tutto il movimento (discesa + salita).
+                        Utile per esercizi controllati o powerlifting.
+                        
+                        Esempio: Panca piana
+                        • Eccentrica + Concentrica: misura velocità totale ✅
+                        """
+                    }
+                }
+                
                 // MARK: - Velocity Loss Section
                 Section {
                     VStack(alignment: .leading, spacing: 8) {

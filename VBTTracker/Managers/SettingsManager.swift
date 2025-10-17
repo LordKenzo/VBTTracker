@@ -13,7 +13,10 @@ class SettingsManager: ObservableObject {
     static let shared = SettingsManager()
     
     // MARK: - Published Properties
-    
+    @Published var velocityMeasurementMode: VBTRepDetector.VelocityMeasurementMode {
+        didSet { save() }
+    }
+
     // Velocity Ranges (da letteratura scientifica - panca piana)
     @Published var velocityRanges: VelocityRanges {
         didSet { save() }
@@ -81,6 +84,7 @@ class SettingsManager: ObservableObject {
         static let repMinVelocity = "repMinVelocity"
         static let repMinPeakVelocity = "repMinPeakVelocity"
         static let repMinAcceleration = "repMinAcceleration"
+        static let velocityMode = "velocityMode"
     }
     
     // MARK: - Initialization
@@ -120,6 +124,10 @@ class SettingsManager: ObservableObject {
         savedCalibration = loadedCalibration
         
         print("✅ SettingsManager inizializzato")
+        let loadedVelocityMode = UserDefaults.standard.string(forKey: Keys.velocityMode) ?? "concentricOnly"
+           velocityMeasurementMode = loadedVelocityMode == "fullROM" ? .fullROM : .concentricOnly
+           
+           print("✅ SettingsManager inizializzato")
     }
     
     // MARK: - Save/Load Methods
@@ -148,6 +156,9 @@ class SettingsManager: ObservableObject {
         // Sensor
         UserDefaults.standard.set(lastConnectedSensorMAC, forKey: Keys.lastSensorMAC)
         UserDefaults.standard.set(lastConnectedSensorName, forKey: Keys.lastSensorName)
+        
+        let modeString = velocityMeasurementMode == .fullROM ? "fullROM" : "concentricOnly"
+          UserDefaults.standard.set(modeString, forKey: Keys.velocityMode)
     }
     
     private static func loadVelocityRanges() -> VelocityRanges {
@@ -191,6 +202,7 @@ class SettingsManager: ObservableObject {
         repMinPeakVelocity = 0.15
         repMinAcceleration = 2.5
         voiceLanguage = "it-IT"
+        velocityMeasurementMode = .concentricOnly
         print("🔄 Impostazioni resettate ai valori predefiniti")
     }
     

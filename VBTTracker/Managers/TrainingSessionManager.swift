@@ -40,6 +40,8 @@ class TrainingSessionManager: ObservableObject {
     private var isMoving = false
     private var phase: MovementPhase = .idle
     
+    private let repDetector = VBTRepDetector()
+
     private var inConcentricPhase = false
     private var concentricPeakReached = false
     private var lastRepTime: Date?
@@ -81,7 +83,7 @@ class TrainingSessionManager: ObservableObject {
     ) {
         guard isRecording else { return }
         
-        // 1. Get vertical acceleration (Z axis)
+        // 1. Ottieni accelerazione Z (verticale)
         let accelZ = acceleration[2]
         
         let accelNoGravity: Double
@@ -91,120 +93,45 @@ class TrainingSessionManager: ObservableObject {
             accelNoGravity = accelZ - 1.0
         }
         
-        let accelMS2 = accelNoGravity * 9.81
+        // 2. Passa modalità velocità al detector
+        repDetector.velocityMode = SettingsManager.shared.velocityMeasurementMode
         
-        // 2. Detect movement start
-        let minAccel = SettingsManager.shared.repMinAcceleration
-        let movementDetected = abs(accelMS2) > minAccel
+        // 3. Rileva rep
+        let result = repDetector.addSample(
+            accZ: accelNoGravity,
+            timestamp: Date()
+        )
         
-        if movementDetected && !isMoving {
-            // 🟢 START MOVEMENT
-            isMoving = true
-            velocity = 0.0
-            peakVelocity = 0.0
-            inConcentricPhase = false
-            concentricPeakReached = false
-            movementStartTime = Date()
+        // 4. Se rilevata rep, aggiorna contatori
+        if result.repDetected, let peakVel = result.peakVelocity {
+            countRep(peakVelocity: peakVel)
         }
         
-        if isMoving {
-            // 3. Integrate velocity
-            let previousVelocity = velocity
-            velocity += accelMS2 * dt
+        // 5. ⭐ AGGIORNA ZONA CORRENTE (basata su velocità corrente o picco)
+        DispatchQueue.main.async {
+            // Usa currentVelocity se disponibile, altrimenti peakVelocity
+            let velocityForZone = self.currentVelocity > 0.1 ? self.currentVelocity : self.peakVelocity
             
-            // 4. Phase detection and rep counting
-            
-            let minVel = SettingsManager.shared.repMinVelocity
-            if velocity > minVel {
-                if !inConcentricPhase {
-                    inConcentricPhase = true
-                    concentricPeakReached = false
-                }
-                
-                phase = .concentric
-                
-                // Update peak
-                if velocity > peakVelocity {
-                    peakVelocity = velocity
-                }
+            if velocityForZone > 0.1 {
+                self.currentZone = SettingsManager.shared.getTrainingZone(for: velocityForZone)
             }
             
-            // Peak detection: velocity starts decreasing after concentric phase
-            if inConcentricPhase && !concentricPeakReached {
-                let minPeak = SettingsManager.shared.repMinPeakVelocity
-                if previousVelocity > velocity && peakVelocity > minPeak {
-                    concentricPeakReached = true
-                    
-                    // Update current zone based on peak velocity
-                    DispatchQueue.main.async {
-                        self.currentZone = SettingsManager.shared.getTrainingZone(for: self.peakVelocity)
-                    }
-                }
-            }
+            // Aggiorna anche currentVelocity con valore smoothed
+            self.currentVelocity = abs(result.currentValue) * 9.81 // g → m/s²
             
-            // ECCENTRIC PHASE (downward, velocity < -0.15 m/s)
-            if velocity < -0.15 {
-                phase = .eccentric
-                
-                // ⭐ COUNT REP: with anti-double-counting
-                if concentricPeakReached && inConcentricPhase {
-                    let timeSinceLastRep = lastRepTime?.timeIntervalSinceNow ?? -1.0
-                    let isValidTiming = abs(timeSinceLastRep) > 0.3 || lastRepTime == nil  // Da 0.5s a 0.3s
-                    
-                    if isValidTiming {
-                        countRep(peakVelocity: peakVelocity)
-                        lastRepTime = Date()
-                        
-                        // Reset flags for next rep
-                        inConcentricPhase = false
-                        concentricPeakReached = false
-                    } else {
-                        // Reset flags even when ignoring (avoid infinite loop)
-                        inConcentricPhase = false
-                        concentricPeakReached = false
-                    }
-                }
-            }
-            
-            // 5. Detect END of movement
-            let movementDuration = Date().timeIntervalSince(movementStartTime ?? Date())
-            let isAlmostStopped = abs(velocity) < 0.12
-            let lowAcceleration = abs(accelMS2) < 2.0
-            let minDurationPassed = movementDuration > 0.3
-            
-            if isAlmostStopped && lowAcceleration && minDurationPassed {
-                // 🔴 END MOVEMENT
-                isMoving = false
-                phase = .idle
-                velocity = 0.0
-                inConcentricPhase = false
-                concentricPeakReached = false
-            }
-            
-            // Safety: force stop after 3 seconds
-            if movementDuration > 3.0 {
-                isMoving = false
-                phase = .idle
-                velocity = 0.0
-                inConcentricPhase = false
-                concentricPeakReached = false
-            }
-            
-            // Update current velocity for UI
-            DispatchQueue.main.async {
-                self.currentVelocity = self.velocity
-            }
-            
-        } else {
-            // IDLE
-            velocity = 0.0
-            phase = .idle
-            
-            DispatchQueue.main.async {
-                self.currentVelocity = 0.0
+            // Aggiorna peakVelocity durante la rep
+            if let peakVel = result.peakVelocity, peakVel > self.peakVelocity {
+                self.peakVelocity = peakVel
             }
         }
     }
+    
+    // MARK: - Public Methods
+       
+       /// Ottieni campioni accelerazione per il grafico
+       func getAccelerationSamples() -> [AccelerationSample] {
+           return repDetector.getSamples()
+       }
     
     // MARK: - Private Methods
     
@@ -300,5 +227,7 @@ class TrainingSessionManager: ObservableObject {
         repPeakVelocities.removeAll()
         firstRepPeakVelocity = nil
         currentZone = .tooSlow
+        
+        repDetector.reset()
     }
 }

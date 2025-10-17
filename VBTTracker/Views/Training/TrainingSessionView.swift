@@ -2,15 +2,7 @@
 //  TrainingSessionView.swift
 //  VBTTracker
 //
-//  Created by Lorenzo Franceschini on 17/10/25.
-//
-
-
-//
-//  TrainingSessionView.swift
-//  VBTTracker
-//
-//  View principale della sessione di allenamento con feedback real-time
+//  UI COMPATTA con scroll
 //
 
 import SwiftUI
@@ -28,35 +20,48 @@ struct TrainingSessionView: View {
     
     var body: some View {
         ZStack {
-            // Background gradient based on current zone
+            // Background gradient
             LinearGradient(
                 colors: [
-                    sessionManager.currentZone.color.opacity(0.2),
-                    sessionManager.currentZone.color.opacity(0.05),
+                    sessionManager.currentZone.color.opacity(0.15),
+                    Color.clear
                 ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
+                startPoint: .top,
+                endPoint: .bottom
             )
             .ignoresSafeArea()
             
-            VStack(spacing: 20) {
-                // Target Zone Info
-                targetZoneCard
-                
-                // Real-time Metrics
-                if sessionManager.isRecording {
-                    currentMetricsCard
+            // ⭐ SCROLL VIEW per tutto il contenuto
+            ScrollView {
+                VStack(spacing: 16) {
+                    
+                    // Zona Corrente + Target (compatta)
+                    compactZoneCard
+                    
+                    // Velocità (3 valori in 1 riga)
+                    if sessionManager.isRecording {
+                        compactVelocityCard
+                    }
+                    
+                    // Grafico Accelerazione
+                    if sessionManager.isRecording {
+                        compactGraphCard
+                    }
+                    
+                    // Reps Counter
+                    compactRepsCard
+                    
+                    // Velocity Loss (se attivo)
+                    if settings.stopOnVelocityLoss && sessionManager.repCount > 1 {
+                        velocityLossCard
+                    }
+                    
+                    // Control Buttons
+                    controlButtons
+                        .padding(.top, 8)
                 }
-                
-                // Reps Counter
-                repsCounterCard
-                
-                Spacer()
-                
-                // Control Buttons
-                controlButtons
+                .padding()
             }
-            .padding()
             
             // TOAST NOTIFICATION
             if sessionManager.repCount > 0 && sessionManager.isRecording {
@@ -73,17 +78,21 @@ struct TrainingSessionView: View {
                     .padding(.bottom, 100)
                 }
             }
-        }  // CHIUSURA ZSTACK
+        }
         .navigationTitle("Allenamento")
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(sessionManager.isRecording)
         .toolbar {
-            if sessionManager.isRecording {
-                ToolbarItem(placement: .navigationBarLeading) {
+            ToolbarItem(placement: .navigationBarLeading) {
+                if sessionManager.isRecording {
                     Button("Termina") {
                         showEndSessionAlert = true
                     }
                     .foregroundStyle(.red)
+                    .fontWeight(.semibold)
+                } else {
+                    // Mostra back button normale
+                    EmptyView()
                 }
             }
         }
@@ -105,240 +114,261 @@ struct TrainingSessionView: View {
         }
     }
     
-    // MARK: - Target Zone Card
+    // MARK: - Compact Zone Card
     
-    private var targetZoneCard: some View {
-        VStack(spacing: 12) {
-            HStack {
-                Image(systemName: targetZone.icon)
-                    .font(.title)
-                    .foregroundStyle(targetZone.color)
+    private var compactZoneCard: some View {
+        HStack(spacing: 12) {
+            // Zona Corrente
+            HStack(spacing: 8) {
+                Image(systemName: sessionManager.currentZone.icon)
+                    .foregroundStyle(sessionManager.currentZone.color)
                 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Obiettivo: \(targetZone.rawValue)")
-                        .font(.headline)
-                    
-                    Text(targetZone.description)
-                        .font(.caption)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("ZONA")
+                        .font(.caption2)
                         .foregroundStyle(.secondary)
+                    
+                    Text(sessionManager.currentZone.rawValue)
+                        .font(.subheadline)
+                        .fontWeight(.bold)
                 }
-                
-                Spacer()
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12)
+            .background(sessionManager.currentZone.color.opacity(0.15))
+            .cornerRadius(10)
             
-            // Target Range
-            let range = getRangeForZone(targetZone)
-            HStack {
-                Text("Range Obiettivo")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                
-                Spacer()
-                
-                Text("\(String(format: "%.2f", range.lowerBound)) - \(String(format: "%.2f", range.upperBound)) m/s")
-                    .font(.caption)
-                    .fontWeight(.semibold)
+            // Target
+            HStack(spacing: 8) {
+                Image(systemName: "target")
                     .foregroundStyle(targetZone.color)
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("TARGET")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    
+                    Text(targetZone.rawValue)
+                        .font(.subheadline)
+                        .fontWeight(.bold)
+                }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12)
+            .background(Color(.systemGray6))
+            .cornerRadius(10)
         }
-        .padding()
-        .background(Color(.systemBackground))
-        .cornerRadius(16)
-        .shadow(radius: 2)
     }
     
-    // MARK: - Current Metrics Card
+    // MARK: - Compact Velocity Card (3 valori in 1 riga)
     
-    private var currentMetricsCard: some View {
-        VStack(spacing: 16) {
-            // Banner Zona Corrente EVIDENTE
-            HStack(spacing: 12) {
-                Image(systemName: sessionManager.currentZone.icon)
-                    .font(.title)
-                    .foregroundStyle(.white)
-                
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("ZONA ATTUALE")
-                        .font(.caption)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(.white.opacity(0.8))
-                    
-                    Text(sessionManager.currentZone.rawValue.uppercased())
-                        .font(.title2)
-                        .fontWeight(.bold)
-                        .foregroundStyle(.white)
-                }
-                
-                Spacer()
-                
-                // Indicatore animato
-                Circle()
-                    .fill(.white)
-                    .frame(width: 12, height: 12)
-                    .opacity(sessionManager.currentVelocity > 0.1 ? 1.0 : 0.3)
-                    .animation(.easeInOut(duration: 0.5).repeatForever(), value: sessionManager.currentVelocity)
-            }
-            .padding()
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(sessionManager.currentZone.color)
-            )
-            .shadow(color: sessionManager.currentZone.color.opacity(0.5), radius: 8, x: 0, y: 4)
-            
-            // Velocity Display con colore dinamico
-            VStack(spacing: 8) {
+    private var compactVelocityCard: some View {
+        VStack(spacing: 8) {
+            HStack {
                 Text("VELOCITÀ")
                     .font(.caption)
                     .fontWeight(.semibold)
                     .foregroundStyle(.secondary)
                 
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text(String(format: "%.3f", sessionManager.currentVelocity))
-                        .font(.system(size: 56, weight: .bold, design: .rounded))
+                Spacer()
+            }
+            
+            HStack(spacing: 8) {
+                // Corrente
+                VStack(spacing: 4) {
+                    Text("Corrente")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    
+                    Text(String(format: "%.2f", sessionManager.currentVelocity))
+                        .font(.title3)
+                        .fontWeight(.bold)
                         .foregroundStyle(sessionManager.currentZone.color)
-                        .animation(.easeOut(duration: 0.2), value: sessionManager.currentVelocity)
                     
                     Text("m/s")
-                        .font(.title2)
+                        .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
-            }
-            .padding()
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(sessionManager.currentZone.color.opacity(0.1))
-            )
-            
-            // Stats Grid
-            HStack(spacing: 12) {
-                // Peak Velocity
-                StatCard(
-                    title: "PICCO",
-                    value: String(format: "%.3f", sessionManager.peakVelocity),
-                    unit: "m/s",
-                    color: .purple
-                )
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(sessionManager.currentZone.color.opacity(0.1))
+                .cornerRadius(8)
                 
-                // Mean Velocity (if reps > 0)
-                if sessionManager.repCount > 0 {
-                    StatCard(
-                        title: "MEDIA",
-                        value: String(format: "%.3f", sessionManager.meanVelocity),
-                        unit: "m/s",
-                        color: .blue
-                    )
+                // Picco
+                VStack(spacing: 4) {
+                    Text("Picco")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    
+                    Text(String(format: "%.2f", sessionManager.peakVelocity))
+                        .font(.title3)
+                        .fontWeight(.bold)
+                        .foregroundStyle(.purple)
+                    
+                    Text("m/s")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
-            }
-            
-            // Velocity Loss (if enabled and reps > 1)
-            if settings.stopOnVelocityLoss && sessionManager.repCount > 1 {
-                VStack(spacing: 8) {
-                    HStack {
-                        Text("VELOCITY LOSS")
-                            .font(.caption)
-                            .fontWeight(.semibold)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(Color.purple.opacity(0.1))
+                .cornerRadius(8)
+                
+                // Media
+                if sessionManager.repCount > 0 {
+                    VStack(spacing: 4) {
+                        Text("Media")
+                            .font(.caption2)
                             .foregroundStyle(.secondary)
                         
-                        Spacer()
-                        
-                        Text(String(format: "%.1f%%", sessionManager.velocityLoss))
+                        Text(String(format: "%.2f", sessionManager.meanVelocity))
                             .font(.title3)
                             .fontWeight(.bold)
-                            .foregroundStyle(velocityLossColor)
+                            .foregroundStyle(.blue)
+                        
+                        Text("m/s")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                     }
-                    
-                    // Progress bar migliorata
-                    GeometryReader { geometry in
-                        ZStack(alignment: .leading) {
-                            // Background
-                            RoundedRectangle(cornerRadius: 6)
-                                .fill(Color(.systemGray5))
-                                .frame(height: 12)
-                            
-                            // Progress
-                            RoundedRectangle(cornerRadius: 6)
-                                .fill(
-                                    LinearGradient(
-                                        colors: [velocityLossColor, velocityLossColor.opacity(0.7)],
-                                        startPoint: .leading,
-                                        endPoint: .trailing
-                                    )
-                                )
-                                .frame(
-                                    width: min(geometry.size.width * (sessionManager.velocityLoss / settings.velocityLossThreshold), geometry.size.width),
-                                    height: 12
-                                )
-                                .animation(.easeOut(duration: 0.3), value: sessionManager.velocityLoss)
-                            
-                            // Threshold marker
-                            Rectangle()
-                                .fill(.white)
-                                .frame(width: 2, height: 16)
-                                .position(x: geometry.size.width, y: 6)
-                        }
-                    }
-                    .frame(height: 12)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                    .background(Color.blue.opacity(0.1))
+                    .cornerRadius(8)
                 }
-                .padding()
-                .background(
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(velocityLossColor.opacity(0.1))
-                )
             }
         }
         .padding()
         .background(Color(.systemBackground))
-        .cornerRadius(16)
+        .cornerRadius(12)
         .shadow(radius: 2)
     }
     
-    // MARK: - Reps Counter Card
+    // MARK: - Compact Graph Card
     
-    private var repsCounterCard: some View {
-        HStack(spacing: 16) {
-            Image(systemName: "figure.strengthtraining.traditional")
-                .font(.system(size: 50))
-                .foregroundStyle(.blue)
-            
-            VStack(alignment: .leading, spacing: 4) {
-                Text("RIPETIZIONI")
+    private var compactGraphCard: some View {
+        VStack(spacing: 8) {
+            HStack {
+                Text("SEGNALE ACCELERAZIONE")
                     .font(.caption)
                     .fontWeight(.semibold)
                     .foregroundStyle(.secondary)
                 
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    Text("\(sessionManager.repCount)")
-                        .font(.system(size: 56, weight: .bold, design: .rounded))
-                        .foregroundStyle(.blue)
+                Spacer()
+                
+                // Indicatore REC
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(.red)
+                        .frame(width: 6, height: 6)
                     
-                    // ⭐ NUOVO: Indicatore ultima rep
-                    if sessionManager.repCount > 0 {
-                        VStack(spacing: 4) {
-                            Image(systemName: sessionManager.lastRepInTarget ? "checkmark.circle.fill" : "xmark.circle.fill")
-                                .font(.title)
-                                .foregroundStyle(sessionManager.lastRepInTarget ? .green : .orange)
-                                .symbolEffect(.bounce, value: sessionManager.repCount)
-                            
-                            Text(sessionManager.lastRepInTarget ? "IN TARGET" : "FUORI TARGET")
-                                .font(.caption2)
-                                .fontWeight(.bold)
-                                .foregroundStyle(sessionManager.lastRepInTarget ? .green : .orange)
-                        }
-                    }
+                    Text("REC")
+                        .font(.caption2)
+                        .fontWeight(.bold)
+                        .foregroundStyle(.red)
+                }
+            }
+            
+            RealTimeAccelerationGraph(data: sessionManager.getAccelerationSamples())
+                .frame(height: 120) // ⭐ Ridotto da 200 a 120
+        }
+        .padding()
+        .background(Color(.systemBackground))
+        .cornerRadius(12)
+        .shadow(radius: 2)
+    }
+    
+    // MARK: - Compact Reps Card
+    
+    private var compactRepsCard: some View {
+        HStack(spacing: 16) {
+            // Icona e numero reps
+            HStack(spacing: 12) {
+                Image(systemName: "figure.strengthtraining.traditional")
+                    .font(.system(size: 36))
+                    .foregroundStyle(.blue)
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("RIPETIZIONI")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    
+                    Text("\(sessionManager.repCount)")
+                        .font(.system(size: 40, weight: .bold, design: .rounded))
+                        .foregroundStyle(.blue)
                 }
             }
             
             Spacer()
+            
+            // Indicatore target ultima rep
+            if sessionManager.repCount > 0 {
+                VStack(spacing: 6) {
+                    Image(systemName: sessionManager.lastRepInTarget ? "checkmark.circle.fill" : "xmark.circle.fill")
+                        .font(.title)
+                        .foregroundStyle(sessionManager.lastRepInTarget ? .green : .orange)
+                    
+                    Text(sessionManager.lastRepInTarget ? "IN TARGET" : "FUORI")
+                        .font(.caption2)
+                        .fontWeight(.bold)
+                        .foregroundStyle(sessionManager.lastRepInTarget ? .green : .orange)
+                    
+                    Text(String(format: "%.2f m/s", sessionManager.lastRepPeakVelocity))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
         .padding()
         .background(
             LinearGradient(
-                colors: [Color.blue.opacity(0.15), Color.blue.opacity(0.05)],
+                colors: [Color.blue.opacity(0.1), Color.clear],
                 startPoint: .leading,
                 endPoint: .trailing
             )
         )
-        .cornerRadius(16)
+        .cornerRadius(12)
+    }
+    
+    // MARK: - Velocity Loss Card
+    
+    private var velocityLossCard: some View {
+        VStack(spacing: 8) {
+            HStack {
+                Text("VELOCITY LOSS")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.secondary)
+                
+                Spacer()
+                
+                Text(String(format: "%.1f%%", sessionManager.velocityLoss))
+                    .font(.headline)
+                    .fontWeight(.bold)
+                    .foregroundStyle(velocityLossColor)
+            }
+            
+            // Progress bar
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color(.systemGray5))
+                    
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(velocityLossColor)
+                        .frame(
+                            width: min(
+                                geometry.size.width * (sessionManager.velocityLoss / settings.velocityLossThreshold),
+                                geometry.size.width
+                            )
+                        )
+                }
+            }
+            .frame(height: 8)
+        }
+        .padding()
+        .background(Color(.systemBackground))
+        .cornerRadius(12)
+        .shadow(radius: 2)
     }
     
     // MARK: - Control Buttons
@@ -347,27 +377,25 @@ struct TrainingSessionView: View {
         VStack(spacing: 12) {
             if sessionManager.isRecording {
                 Button(action: {
-                    sessionManager.stopRecording()
-                    // TODO: Save session and show summary
-                    dismiss()
+                    showEndSessionAlert = true
                 }) {
-                    Label("Stop Allenamento", systemImage: "stop.circle.fill")
+                    Label("TERMINA ALLENAMENTO", systemImage: "stop.circle.fill")
                         .font(.headline)
                         .frame(maxWidth: .infinity)
+                        .frame(height: 50)
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.red)
-                .controlSize(.large)
             } else {
                 Button(action: {
                     sessionManager.startRecording()
                 }) {
-                    Label("Inizia", systemImage: "play.circle.fill")
+                    Label("INIZIA", systemImage: "play.circle.fill")
                         .font(.headline)
                         .frame(maxWidth: .infinity)
+                        .frame(height: 50)
                 }
                 .buttonStyle(.borderedProminent)
-                .controlSize(.large)
             }
         }
     }
@@ -387,27 +415,10 @@ struct TrainingSessionView: View {
         }
     }
     
-    private func getRangeForZone(_ zone: TrainingZone) -> ClosedRange<Double> {
-        switch zone {
-        case .maxStrength:
-            return settings.velocityRanges.maxStrength
-        case .strength:
-            return settings.velocityRanges.strength
-        case .strengthSpeed:
-            return settings.velocityRanges.strengthSpeed
-        case .speed:
-            return settings.velocityRanges.speed
-        case .maxSpeed:
-            return settings.velocityRanges.maxSpeed
-        case .tooSlow:
-            return 0.0...0.15
-        }
-    }
-    
     // MARK: - Data Stream
     
     private func startDataStream() {
-        dataStreamTimer = Timer.scheduledTimer(withTimeInterval: 0.02, repeats: true) { _ in
+        dataStreamTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
             sessionManager.processSensorData(
                 acceleration: bleManager.acceleration,
                 angularVelocity: bleManager.angularVelocity,
@@ -415,12 +426,10 @@ struct TrainingSessionView: View {
                 isCalibrated: bleManager.isCalibrated
             )
             
-            // Check velocity loss threshold
             if settings.stopOnVelocityLoss &&
                sessionManager.isRecording &&
                sessionManager.velocityLoss >= settings.velocityLossThreshold {
                 sessionManager.stopRecording()
-                // TODO: Voice feedback "Velocity loss raggiunta"
             }
         }
     }
@@ -428,41 +437,6 @@ struct TrainingSessionView: View {
     private func stopDataStream() {
         dataStreamTimer?.invalidate()
         dataStreamTimer = nil
-    }
-}
-
-// MARK: - Supporting Views
-
-struct StatCard: View {
-    let title: String
-    let value: String
-    let unit: String
-    let color: Color
-    
-    var body: some View {
-        VStack(spacing: 4) {
-            Text(title)
-                .font(.caption2)
-                .fontWeight(.semibold)
-                .foregroundStyle(.secondary)
-            
-            HStack(alignment: .firstTextBaseline, spacing: 2) {
-                Text(value)
-                    .font(.title3)
-                    .fontWeight(.bold)
-                    .foregroundStyle(color)
-                
-                Text(unit)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .padding()
-        .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(color.opacity(0.1))
-        )
     }
 }
 
@@ -488,7 +462,7 @@ struct RepToastView: View {
                         .fontWeight(.semibold)
                         .foregroundStyle(.white.opacity(0.8))
                     
-                    Text(String(format: "%.3f m/s", velocity))
+                    Text(String(format: "%.2f m/s", velocity))
                         .font(.headline)
                         .foregroundStyle(.white)
                 }
@@ -505,7 +479,6 @@ struct RepToastView: View {
                     .shadow(color: (isInTarget ? Color.green : Color.orange).opacity(0.5), radius: 10)
             )
             .onAppear {
-                // Auto-hide dopo 2 secondi
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
                     withAnimation {
                         isVisible = false
