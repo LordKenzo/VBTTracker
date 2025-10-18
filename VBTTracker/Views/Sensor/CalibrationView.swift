@@ -177,7 +177,7 @@ struct CalibrationView: View {
                 .buttonStyle(.bordered)
                 
                 Button(action: {
-                    // ⭐ SALVA calibrazione nel BLEManager
+                    // SALVA calibrazione nel BLEManager
                     if let calibration = calibrationManager.currentCalibration {
                         sensorManager.applyCalibration(calibration)
                         SettingsManager.shared.savedCalibration = calibration
