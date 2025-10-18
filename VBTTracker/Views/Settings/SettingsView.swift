@@ -192,6 +192,257 @@ struct SettingsView: View {
                     Text("Valori più bassi = più sensibile (conta anche reps lente)\nValori più alti = meno sensibile (solo reps veloci)")
                 }
                 
+                // MARK: - Advanced Rep Detection Section
+
+                Section {
+                    VStack(alignment: .leading, spacing: 16) {
+                        
+                        // Tempo tra rep
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text("Tempo minimo tra rep")
+                                Spacer()
+                                Text(String(format: "%.1f s", settings.repMinTimeBetween))
+                                    .foregroundStyle(.secondary)
+                            }
+                            
+                            Slider(value: $settings.repMinTimeBetween, in: 0.3...2.0, step: 0.1)
+                                .tint(.blue)
+                            
+                            Text(timeBetweenDescription)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        
+                        Divider()
+                        
+                        // Durata minima concentrica
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text("Durata minima concentrica")
+                                Spacer()
+                                Text(String(format: "%.2f s", settings.repMinDuration))
+                                    .foregroundStyle(.secondary)
+                            }
+                            
+                            Slider(value: $settings.repMinDuration, in: 0.1...1.0, step: 0.05)
+                                .tint(.blue)
+                            
+                            Text("Movimenti più corti vengono ignorati")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        
+                        Divider()
+                        
+                        // Ampiezza minima
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text("Ampiezza minima movimento")
+                                Spacer()
+                                Text(String(format: "%.2f g", settings.repMinAmplitude))
+                                    .foregroundStyle(.secondary)
+                            }
+                            
+                            Slider(value: $settings.repMinAmplitude, in: 0.2...0.8, step: 0.05)
+                                .tint(.blue)
+                            
+                            Text("Movimenti più piccoli vengono ignorati")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        
+                        Divider()
+                        
+                        // Smoothing
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text("Smoothing (campioni)")
+                                Spacer()
+                                Text("\(settings.repSmoothingWindow)")
+                                    .foregroundStyle(.secondary)
+                            }
+                            
+                            Slider(value: Binding(
+                                get: { Double(settings.repSmoothingWindow) },
+                                set: { settings.repSmoothingWindow = Int($0) }
+                            ), in: 5...15, step: 1)
+                                .tint(.blue)
+                            
+                            Text(smoothingDescription)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        
+                        Divider()
+                        
+                        // Reset button
+                        Button(action: {
+                            settings.repMinTimeBetween = 0.8
+                            settings.repMinDuration = 0.3
+                            settings.repMinAmplitude = 0.45
+                            settings.repSmoothingWindow = 10
+                        }) {
+                            Label("Ripristina Valori Consigliati", systemImage: "arrow.counterclockwise")
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                    
+                } header: {
+                    Text("Sensibilità Rilevamento Rep (Avanzato)")
+                } footer: {
+                    Text("""
+                    ⚠️ SOLO PER FINE-TUNING IN PALESTRA
+                    
+                    Valori consigliati:
+                    • Tempo tra rep: 0.8s (forza), 0.5s (velocità)
+                    • Durata minima: 0.3s
+                    • Ampiezza minima: 0.45g
+                    • Smoothing: 10 campioni
+                    
+                    Problemi comuni:
+                    • Perde rep veloci → Riduci "Tempo tra rep" a 0.5s
+                    • Conta rep doppie → Aumenta "Tempo tra rep" a 1.2s
+                    • Ignora movimenti validi → Riduci "Ampiezza minima"
+                    • Troppo sensibile al rumore → Aumenta "Smoothing"
+                    """)
+                }
+                
+                // MARK: - Advanced Rep Detection Section
+
+                Section {
+                    VStack(alignment: .leading, spacing: 16) {
+                        
+                        // Tempo tra rep
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text("Tempo minimo tra rep")
+                                Spacer()
+                                Text(String(format: "%.1f s", settings.repMinTimeBetween))
+                                    .foregroundStyle(.secondary)
+                            }
+                            
+                            Slider(value: $settings.repMinTimeBetween, in: 0.3...2.0, step: 0.1)
+                                .tint(.blue)
+                            
+                            Text(timeBetweenDescription)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        
+                        Divider()
+                        
+                        // Durata minima concentrica
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text("Durata minima concentrica")
+                                Spacer()
+                                Text(String(format: "%.2f s", settings.repMinDuration))
+                                    .foregroundStyle(.secondary)
+                            }
+                            
+                            Slider(value: $settings.repMinDuration, in: 0.1...1.0, step: 0.05)
+                                .tint(.blue)
+                            
+                            Text("Movimenti più corti vengono ignorati")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        
+                        Divider()
+                        
+                        // Ampiezza minima
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text("Ampiezza minima movimento")
+                                Spacer()
+                                Text(String(format: "%.2f g", settings.repMinAmplitude))
+                                    .foregroundStyle(.secondary)
+                            }
+                            
+                            Slider(value: $settings.repMinAmplitude, in: 0.2...0.8, step: 0.05)
+                                .tint(.blue)
+                            
+                            Text("Movimenti più piccoli vengono ignorati")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        
+                        Divider()
+                        
+                        // Soglia eccentrica
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text("Soglia inizio discesa")
+                                Spacer()
+                                Text(String(format: "%.2f g", settings.repEccentricThreshold))
+                                    .foregroundStyle(.secondary)
+                            }
+                            
+                            Slider(value: $settings.repEccentricThreshold, in: 0.05...0.40, step: 0.05)
+                                .tint(.blue)
+                            
+                            Text(eccentricThresholdDescription)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        
+                        Divider()
+                        
+                        // Smoothing
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text("Smoothing (campioni)")
+                                Spacer()
+                                Text("\(settings.repSmoothingWindow)")
+                                    .foregroundStyle(.secondary)
+                            }
+                            
+                            Slider(value: Binding(
+                                get: { Double(settings.repSmoothingWindow) },
+                                set: { settings.repSmoothingWindow = Int($0) }
+                            ), in: 5...15, step: 1)
+                                .tint(.blue)
+                            
+                            Text(smoothingDescription)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        
+                        Divider()
+                        
+                        // Reset button
+                        Button(action: {
+                            settings.repMinTimeBetween = 0.8
+                            settings.repMinDuration = 0.3
+                            settings.repMinAmplitude = 0.45
+                            settings.repSmoothingWindow = 10
+                        }) {
+                            Label("Ripristina Valori Consigliati", systemImage: "arrow.counterclockwise")
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                    
+                } header: {
+                    Text("Sensibilità Rilevamento Rep (Avanzato)")
+                } footer: {
+                    Text("""
+                    ⚠️ SOLO PER FINE-TUNING IN PALESTRA
+                    
+                    Valori consigliati:
+                    • Tempo tra rep: 0.8s (forza), 0.5s (velocità)
+                    • Durata minima: 0.3s
+                    • Ampiezza minima: 0.45g
+                    • Smoothing: 10 campioni
+                    
+                    Problemi comuni:
+                    • Perde rep veloci → Riduci "Tempo tra rep" a 0.5s
+                    • Conta rep doppie → Aumenta "Tempo tra rep" a 1.2s
+                    • Ignora movimenti validi → Riduci "Ampiezza minima"
+                    • Troppo sensibile al rumore → Aumenta "Smoothing"
+                    """)
+                }
+                
                 // MARK: - Audio Feedback Section
                 Section {
                     Toggle(isOn: $settings.voiceFeedbackEnabled) {
@@ -287,6 +538,38 @@ struct SettingsView: View {
             }
         }
     }
+    // MARK: - Helper Computed Properties
+
+    private var timeBetweenDescription: String {
+        if settings.repMinTimeBetween < 0.6 {
+            return "⚡ Ottimo per movimenti veloci/esplosivi"
+        } else if settings.repMinTimeBetween < 1.0 {
+            return "✅ Bilanciato (consigliato)"
+        } else {
+            return "🐢 Per movimenti lenti (forza massima)"
+        }
+    }
+
+    private var smoothingDescription: String {
+        if settings.repSmoothingWindow < 8 {
+            return "⚡ Più reattivo, meno filtrato"
+        } else if settings.repSmoothingWindow <= 12 {
+            return "✅ Bilanciato (consigliato)"
+        } else {
+            return "🎯 Più filtrato, meno rumore"
+        }
+    }
+    
+    private var eccentricThresholdDescription: String {
+        if settings.repEccentricThreshold < 0.10 {
+            return "⚡ Rileva anche ROM molto corti (rischio falsi positivi)"
+        } else if settings.repEccentricThreshold <= 0.20 {
+            return "✅ Bilanciato (ROM standard)"
+        } else {
+            return "🎯 Solo ROM completi (fino al petto)"
+        }
+    }
+    
     
     // MARK: - Sensor Status Row
     

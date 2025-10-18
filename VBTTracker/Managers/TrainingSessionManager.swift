@@ -41,6 +41,8 @@ class TrainingSessionManager: ObservableObject {
     private var phase: MovementPhase = .idle
     
     private let repDetector = VBTRepDetector()
+    private let voiceFeedback = VoiceFeedbackManager()
+
 
     private var inConcentricPhase = false
     private var concentricPeakReached = false
@@ -66,14 +68,44 @@ class TrainingSessionManager: ObservableObject {
     func startRecording() {
         isRecording = true
         resetMetrics()
+        
+        // Setup voice feedback callback SEMPLIFICATO
+        repDetector.onPhaseChange = { [weak self] phase in
+            guard let self = self else { return }
+            
+            DispatchQueue.main.async {
+                switch phase {
+                case .eccentric:
+                    // Prima volta = "Stacco", altre = "Eccentrica"
+                    if self.repCount == 0 && !self.repDetector.hasAnnouncedUnrack {
+                        self.voiceFeedback.announceBarUnrack()
+                    } else {
+                        self.voiceFeedback.announceEccentric()
+                    }
+                    
+                case .concentric:
+                    self.voiceFeedback.announceConcentric()
+                    
+                case .idle, .returnToRack:
+                    break
+                }
+            }
+        }
+        
+        voiceFeedback.announceWorkoutStart()
         print("▶️ Sessione allenamento iniziata - Target: \(targetZone.rawValue)")
     }
-    
+
     func stopRecording() {
         isRecording = false
         calculateFinalMetrics()
+        
+        // Annuncia fine
+        voiceFeedback.announceWorkoutEnd(reps: repCount)
+        
         print("⏹️ Sessione terminata - Reps: \(repCount), Mean: \(String(format: "%.3f", meanVelocity)) m/s")
     }
+
     
     func processSensorData(
         acceleration: [Double],
@@ -107,7 +139,7 @@ class TrainingSessionManager: ObservableObject {
             countRep(peakVelocity: peakVel)
         }
         
-        // 5. ⭐ AGGIORNA ZONA CORRENTE (basata su velocità corrente o picco)
+        // 5. AGGIORNA ZONA CORRENTE (basata su velocità corrente o picco)
         DispatchQueue.main.async {
             // Usa currentVelocity se disponibile, altrimenti peakVelocity
             let velocityForZone = self.currentVelocity > 0.1 ? self.currentVelocity : self.peakVelocity
@@ -135,6 +167,26 @@ class TrainingSessionManager: ObservableObject {
     
     // MARK: - Private Methods
     
+    private func handlePhaseChange(_ phase: VBTRepDetector.Phase) {
+        DispatchQueue.main.async {
+            switch phase {
+            case .eccentric:
+                // Primo movimento o eccentrica normale
+                if self.repCount == 0 && !self.repDetector.hasAnnouncedUnrack {
+                    self.voiceFeedback.announceBarUnrack()
+                } else {
+                    self.voiceFeedback.announceEccentric()
+                }
+                
+            case .concentric:
+                self.voiceFeedback.announceConcentric()
+                
+            case .idle, .returnToRack:
+                break
+            }
+        }
+    }
+
     private func countRep(peakVelocity: Double) {
         repPeakVelocities.append(peakVelocity)
         
@@ -150,11 +202,21 @@ class TrainingSessionManager: ObservableObject {
             self.lastRepInTarget = isInTarget
             self.calculateMeanVelocity()
             self.calculateVelocityLoss()
+            
+            // Annuncia rep completata
+            self.voiceFeedback.announceRep(number: self.repCount, isInTarget: isInTarget)
+            
+            // Check velocity loss
+            if SettingsManager.shared.stopOnVelocityLoss &&
+               self.velocityLoss >= SettingsManager.shared.velocityLossThreshold {
+                self.voiceFeedback.announceVelocityLoss(percentage: self.velocityLoss)
+            }
         }
         
         let emoji = isInTarget ? "✅" : "⚠️"
         print("\(emoji) RIPETIZIONE #\(repCount + 1) completata - Peak: \(String(format: "%.3f", peakVelocity)) m/s - \(isInTarget ? "IN TARGET" : "FUORI TARGET")")
     }
+    
 
     // Helper method
     private func checkIfInTarget(velocity: Double) -> Bool {

@@ -9,7 +9,7 @@ import SwiftUI
 
 struct SensorConnectionView: View {
     @StateObject private var bleManager = BLEManager()
-    @StateObject private var calibrationManager = CalibrationManager() // ⭐ NUOVO
+    @StateObject private var calibrationManager = CalibrationManager()
     
     var body: some View {
         NavigationStack {
@@ -45,7 +45,7 @@ struct SensorConnectionView: View {
                     Text(bleManager.sensorName)
                         .font(.headline)
                     
-                    // ⭐ NUOVO: Badge calibrazione
+                    // Badge calibrazione
                     if bleManager.isCalibrated {
                         HStack(spacing: 4) {
                             Image(systemName: "checkmark.seal.fill")
@@ -150,7 +150,7 @@ struct SensorConnectionView: View {
                     .tint(.red)
                     .controlSize(.large)
                     
-                    // ⭐ MODIFICATO: Usa il calibrationManager condiviso
+                    // Usa il calibrationManager condiviso
                     NavigationLink(destination: CalibrationView(
                         calibrationManager: calibrationManager,  // ← Usa @StateObject
                         sensorManager: bleManager

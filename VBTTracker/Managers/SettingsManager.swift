@@ -68,6 +68,31 @@ class SettingsManager: ObservableObject {
         didSet { save() }
     }
     
+    /// Tempo minimo tra due rep consecutive (secondi)
+    @Published var repMinTimeBetween: Double {
+        didSet { save() }
+    }
+
+    /// Durata minima fase concentrica (secondi)
+    @Published var repMinDuration: Double {
+        didSet { save() }
+    }
+
+    /// Ampiezza minima fase concentrica (g)
+    @Published var repMinAmplitude: Double {
+        didSet { save() }
+    }
+
+    /// Smoothing window size (campioni)
+    @Published var repSmoothingWindow: Int {
+        didSet { save() }
+    }
+    
+    /// Soglia minima discesa per iniziare eccentrica (g, valore assoluto)
+    @Published var repEccentricThreshold: Double {
+        didSet { save() }
+    }
+    
     // MARK: - UserDefaults Keys
     
     private enum Keys {
@@ -85,12 +110,18 @@ class SettingsManager: ObservableObject {
         static let repMinPeakVelocity = "repMinPeakVelocity"
         static let repMinAcceleration = "repMinAcceleration"
         static let velocityMode = "velocityMode"
+        static let repMinTimeBetween = "repMinTimeBetween"
+        static let repMinDuration = "repMinDuration"
+        static let repMinAmplitude = "repMinAmplitude"
+        static let repSmoothingWindow = "repSmoothingWindow"
+        static let repEccentricThreshold = "repEccentricThreshold"
+
     }
     
     // MARK: - Initialization
     
     private init() {
-        // ⭐ INIT senza usare self - prima assegna, POI stampa
+        // INIT senza usare self - prima assegna, POI stampa
         let loadedRanges = SettingsManager.loadVelocityRanges()
         let loadedThreshold = UserDefaults.standard.double(forKey: Keys.velocityLossThreshold)
         let loadedStopOnLoss = UserDefaults.standard.bool(forKey: Keys.stopOnVelocityLoss)
@@ -106,6 +137,9 @@ class SettingsManager: ObservableObject {
         let loadedMinVel = UserDefaults.standard.double(forKey: Keys.repMinVelocity)
         let loadedMinPeak = UserDefaults.standard.double(forKey: Keys.repMinPeakVelocity)
         let loadedMinAccel = UserDefaults.standard.double(forKey: Keys.repMinAcceleration)
+        let loadedEccentricThreshold = UserDefaults.standard.double(forKey: Keys.repEccentricThreshold)
+           repEccentricThreshold = loadedEccentricThreshold == 0 ? 0.15 : loadedEccentricThreshold  // Default 0.15g
+          
 
         repMinVelocity = loadedMinVel == 0 ? 0.10 : loadedMinVel
         repMinPeakVelocity = loadedMinPeak == 0 ? 0.15 : loadedMinPeak
@@ -123,11 +157,22 @@ class SettingsManager: ObservableObject {
         lastConnectedSensorName = loadedName
         savedCalibration = loadedCalibration
         
-        print("✅ SettingsManager inizializzato")
+        let loadedTimeBetween = UserDefaults.standard.double(forKey: Keys.repMinTimeBetween)
+        repMinTimeBetween = loadedTimeBetween == 0 ? 0.8 : loadedTimeBetween  // Default 0.8s
+        
+        let loadedDuration = UserDefaults.standard.double(forKey: Keys.repMinDuration)
+        repMinDuration = loadedDuration == 0 ? 0.3 : loadedDuration  // Default 0.3s
+        
+        let loadedAmplitude = UserDefaults.standard.double(forKey: Keys.repMinAmplitude)
+        repMinAmplitude = loadedAmplitude == 0 ? 0.45 : loadedAmplitude  // Default 0.45g
+        
+        let loadedWindow = UserDefaults.standard.integer(forKey: Keys.repSmoothingWindow)
+        repSmoothingWindow = loadedWindow == 0 ? 10 : loadedWindow  // Default 10
+
         let loadedVelocityMode = UserDefaults.standard.string(forKey: Keys.velocityMode) ?? "concentricOnly"
            velocityMeasurementMode = loadedVelocityMode == "fullROM" ? .fullROM : .concentricOnly
            
-           print("✅ SettingsManager inizializzato")
+        print("✅ SettingsManager inizializzato")
     }
     
     // MARK: - Save/Load Methods
@@ -156,6 +201,14 @@ class SettingsManager: ObservableObject {
         // Sensor
         UserDefaults.standard.set(lastConnectedSensorMAC, forKey: Keys.lastSensorMAC)
         UserDefaults.standard.set(lastConnectedSensorName, forKey: Keys.lastSensorName)
+        
+        // Rep Detection
+        UserDefaults.standard.set(repMinTimeBetween, forKey: Keys.repMinTimeBetween)
+        UserDefaults.standard.set(repMinDuration, forKey: Keys.repMinDuration)
+        UserDefaults.standard.set(repMinAmplitude, forKey: Keys.repMinAmplitude)
+        UserDefaults.standard.set(repSmoothingWindow, forKey: Keys.repSmoothingWindow)
+        UserDefaults.standard.set(repEccentricThreshold, forKey: Keys.repEccentricThreshold)
+
         
         let modeString = velocityMeasurementMode == .fullROM ? "fullROM" : "concentricOnly"
           UserDefaults.standard.set(modeString, forKey: Keys.velocityMode)
@@ -203,6 +256,12 @@ class SettingsManager: ObservableObject {
         repMinAcceleration = 2.5
         voiceLanguage = "it-IT"
         velocityMeasurementMode = .concentricOnly
+        repMinTimeBetween = 0.8
+        repMinDuration = 0.3
+        repMinAmplitude = 0.45
+        repSmoothingWindow = 10
+        repEccentricThreshold = 0.15
+
         print("🔄 Impostazioni resettate ai valori predefiniti")
     }
     

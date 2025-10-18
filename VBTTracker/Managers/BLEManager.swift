@@ -173,7 +173,7 @@ class BLEManager: NSObject, ObservableObject, SensorDataProvider {
             Double(yawRaw) / 32768.0 * 180.0
         ]
         
-        // ⭐ Applica calibrazione se presente
+        // Applica calibrazione se presente
         var finalAcceleration = rawAcceleration
         var finalAngularVelocity = rawAngularVelocity
         var finalAngles = rawAngles

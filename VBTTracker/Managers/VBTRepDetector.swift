@@ -20,20 +20,25 @@ class VBTRepDetector {
     
     var velocityMode: VelocityMeasurementMode = .concentricOnly
     
-    /// Smoothing
-    private let windowSize: Int = 10  // ⭐ Aumentato da 7 a 10 (più smoothing)
+    /// ⭐ PARAMETRI ORA VENGONO DA SETTINGS (non più costanti hardcoded)
+    private var windowSize: Int {
+        SettingsManager.shared.repSmoothingWindow
+    }
+    
+    private var minConcentricAmplitude: Double {
+        SettingsManager.shared.repMinAmplitude
+    }
+    
+    private var minTimeBetweenReps: TimeInterval {
+        SettingsManager.shared.repMinTimeBetween
+    }
+    
+    private var minConcentricDuration: TimeInterval {
+        SettingsManager.shared.repMinDuration
+    }
     
     /// Soglia accelerazione per rilevare movimento attivo (m/s²)
     private let activeMovementThreshold: Double = 3.0
-    
-    /// Ampiezza minima fase concentrica (g)
-    private let minConcentricAmplitude: Double = 0.45  // ⭐ Aumentato da 0.4 a 0.45
-    
-    /// Tempo minimo tra rep (s)
-    private let minTimeBetweenReps: TimeInterval = 1.2  // ⭐ Aumentato da 0.6 a 1.2
-    
-    /// Durata minima fase concentrica (s) - evita micro-movimenti
-    private let minConcentricDuration: TimeInterval = 0.3  // ⭐ NUOVO
     
     // MARK: - State
     
@@ -42,6 +47,11 @@ class VBTRepDetector {
     
     private var currentPhase: Phase = .idle
     private var lastRepTime: Date?
+    
+    // Voice feedback
+    var hasAnnouncedUnrack = false  // ⭐ Reso pubblico (era private)
+    private var lastAnnouncedPhase: Phase = .idle
+    var onPhaseChange: ((Phase) -> Void)?  // ⭐ Callback per notificare cambio fase
     
     private var concentricStartValue: Double?
     private var concentricStartTime: Date?
@@ -92,6 +102,8 @@ class VBTRepDetector {
         eccentricStartTime = nil
         totalROMStartValue = nil
         totalROMStartTime = nil
+        hasAnnouncedUnrack = false
+        lastAnnouncedPhase = .idle
     }
     
     func getSamples() -> [AccelerationSample] {
@@ -129,9 +141,27 @@ class VBTRepDetector {
         
         // 1️⃣ RILEVA INIZIO ECCENTRICA (discesa significativa)
         if currentPhase == .idle || currentPhase == .returnToRack {
-            // Rileva discesa: valore diventa negativo e scende
-            if current < -0.2 && current < previous {
+            // ⭐ Usa soglia da Settings (configurabile)
+            let eccentricThreshold = -SettingsManager.shared.repEccentricThreshold
+            
+            if current < eccentricThreshold && current < previous {
+                
+                // ⭐ CAMBIO FASE: da idle/rack → eccentrica
+                let wasIdle = (currentPhase == .idle || currentPhase == .returnToRack)
                 currentPhase = .eccentric
+                
+                // ⭐ VOICE: Prima eccentrica = "Stacco", altre = "Eccentrica"
+                if wasIdle {
+                    if !hasAnnouncedUnrack {
+                        hasAnnouncedUnrack = true
+                        print("🔊 Annuncio: Stacco del bilanciere")
+                        onPhaseChange?(.eccentric)  // ← Callback "stacco"
+                    } else if lastAnnouncedPhase != .eccentric {
+                        print("🔊 Annuncio: Eccentrica")
+                        onPhaseChange?(.eccentric)  // ← Callback "eccentrica"
+                        lastAnnouncedPhase = .eccentric
+                    }
+                }
                 
                 // ⭐ Per Full ROM: registra inizio movimento totale
                 if velocityMode == .fullROM {
@@ -141,7 +171,7 @@ class VBTRepDetector {
                     totalROMStartTime = Date()
                 }
                 
-                print("📉 ECCENTRICA iniziata (discesa al petto)")
+                print("📉 ECCENTRICA iniziata (discesa sotto \(String(format: "%.2f", eccentricThreshold))g)")
             }
         }
         
@@ -154,6 +184,13 @@ class VBTRepDetector {
                 concentricStartValue = previous
                 concentricStartTime = Date()
                 concentricPeakValue = previous
+                
+                // ⭐ VOICE: Annuncia "Concentrica" IMMEDIATAMENTE
+                if lastAnnouncedPhase != .concentric {
+                    print("🔊 Annuncio: Concentrica")
+                    onPhaseChange?(.concentric)  // ← Callback "concentrica"
+                    lastAnnouncedPhase = .concentric
+                }
                 
                 print("🟢 CONCENTRICA iniziata - Start: \(String(format: "%.2f", previous))g")
             }
@@ -218,8 +255,9 @@ class VBTRepDetector {
                 let timeSinceLastRep = lastRepTime?.timeIntervalSinceNow ?? -1.0
                 let validTiming = abs(timeSinceLastRep) > minTimeBetweenReps || lastRepTime == nil
                 let validAmplitude = amplitude >= minConcentricAmplitude
+                let validDuration = duration >= minConcentricDuration  // ⭐ NUOVO
                 
-                if validAmplitude && validTiming {
+                if validAmplitude && validTiming && validDuration {
                     // ✅ REP VALIDA
                     peakVelocity = velocity
                     
@@ -236,7 +274,11 @@ class VBTRepDetector {
                     // Passa a fase eccentrica (o ritorno rack)
                     currentPhase = .eccentric
                 } else {
-                    print("⚠️ Rep ignorata - Ampiezza: \(String(format: "%.2f", amplitude))g, Timing: \(validTiming)")
+                    let reason = !validAmplitude ? "ampiezza < \(minConcentricAmplitude)g" :
+                                !validTiming ? "timing < \(minTimeBetweenReps)s" :
+                                !validDuration ? "durata < \(minConcentricDuration)s (\(String(format: "%.2f", duration))s)" :
+                                "sconosciuto"
+                    print("⚠️ Rep ignorata - \(reason)")
                     currentPhase = .returnToRack
                 }
                 
@@ -287,6 +329,9 @@ class VBTRepDetector {
             return sqrt(2.0 * abs(accelMS2) * estimatedROM)
         }
     }
+    
+    // ⭐ RIMUOVI questo metodo (non serve più)
+    // private func notifyPhaseChange(...) { ... }
 }
 
 // MARK: - Result Model
