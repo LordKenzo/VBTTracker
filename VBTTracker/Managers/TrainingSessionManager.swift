@@ -36,10 +36,10 @@ class TrainingSessionManager: ObservableObject {
     
     // MARK: - Private Properties
     
-    private var velocity: Double = 0.0
+    private var integratedVelocity: Double = 0.0
     private var isMoving = false
     private var phase: MovementPhase = .idle
-    
+
     let repDetector = VBTRepDetector()
     private let voiceFeedback = VoiceFeedbackManager()
 
@@ -54,7 +54,8 @@ class TrainingSessionManager: ObservableObject {
     var firstRepPeakVelocity: Double?
     
     // Constants
-    private let dt: Double = 0.02 // 20ms sampling
+    private let defaultSampleInterval: Double = 0.02 // 20ms sampling
+    private let maxReasonableVelocity: Double = 5.0 // m/s guardrail
     // private let movementThreshold: Double = 2.5 // m/s²
     
     enum MovementPhase {
@@ -68,7 +69,7 @@ class TrainingSessionManager: ObservableObject {
     func startRecording() {
         isRecording = true
         resetMetrics()
-        
+
         // ✅ NUOVO: Logga se pattern appreso è disponibile
         if let pattern = repDetector.learnedPattern {
             print("🎓 Pattern appreso caricato:")
@@ -109,11 +110,15 @@ class TrainingSessionManager: ObservableObject {
     func stopRecording() {
         isRecording = false
         calculateFinalMetrics()
-        
+
         // Annuncia fine
         voiceFeedback.announceWorkoutEnd(reps: repCount)
-        
+
         print("⏹️ Sessione terminata - Reps: \(repCount), Mean: \(String(format: "%.3f", meanVelocity)) m/s")
+
+        // Reset integratore per evitare drift tra sessioni
+        integratedVelocity = 0.0
+        currentVelocity = 0.0
     }
 
     
@@ -134,36 +139,53 @@ class TrainingSessionManager: ObservableObject {
         } else {
             accelNoGravity = accelZ - 1.0
         }
-        
+
         // 2. Passa modalità velocità al detector
         repDetector.velocityMode = SettingsManager.shared.velocityMeasurementMode
-        
+
         // 3. Rileva rep
         let result = repDetector.addSample(
             accZ: accelNoGravity,
             timestamp: Date()
         )
-        
-        // 4. Se rilevata rep, aggiorna contatori
+
+        // 4. Integra accelerazione filtrata per ottenere la velocità in m/s
+        let filteredAcceleration = result.currentValue
+
+        let linearAcceleration = filteredAcceleration * 9.81 // g → m/s²
+        integratedVelocity += linearAcceleration * defaultSampleInterval
+
+        // Limita eventuale drift dovuto a rumore o saturazione
+        integratedVelocity = max(-maxReasonableVelocity, min(maxReasonableVelocity, integratedVelocity))
+        let velocityMagnitude = max(0.0, abs(integratedVelocity))
+
+        // 5. Se rilevata rep, aggiorna contatori
         if result.repDetected, let peakVel = result.peakVelocity {
             countRep(peakVelocity: peakVel)
         }
-        
-        // 5. AGGIORNA ZONA CORRENTE (basata su velocità corrente o picco)
+
+        let currentVelocityMagnitude = velocityMagnitude
+
+        // 6. AGGIORNA ZONA CORRENTE (basata su velocità corrente o picco)
         DispatchQueue.main.async {
             // Usa currentVelocity se disponibile, altrimenti peakVelocity
-            let velocityForZone = self.currentVelocity > 0.1 ? self.currentVelocity : self.peakVelocity
-            
+            let repPeakVelocity = result.peakVelocity ?? self.lastRepPeakVelocity
+            let velocityForZone = max(currentVelocityMagnitude, repPeakVelocity)
+
             if velocityForZone > 0.1 {
                 self.currentZone = SettingsManager.shared.getTrainingZone(for: velocityForZone)
             }
-            
-            // Aggiorna anche currentVelocity con valore smoothed
-            self.currentVelocity = abs(result.currentValue) * 9.81 // g → m/s²
-            
+
+            // Aggiorna velocità corrente con l'integrata (m/s)
+            self.currentVelocity = currentVelocityMagnitude
+
             // Aggiorna peakVelocity durante la rep
-            if let peakVel = result.peakVelocity, peakVel > self.peakVelocity {
-                self.peakVelocity = peakVel
+            if let peakVel = result.peakVelocity {
+                self.lastRepPeakVelocity = peakVel
+
+                if peakVel > self.peakVelocity {
+                    self.peakVelocity = peakVel
+                }
             }
         }
     }
@@ -213,10 +235,16 @@ class TrainingSessionManager: ObservableObject {
             self.lastRepInTarget = isInTarget
             self.calculateMeanVelocity()
             self.calculateVelocityLoss()
-            
+
             // Annuncia rep completata
             self.voiceFeedback.announceRep(number: self.repCount, isInTarget: isInTarget)
-            
+
+            if let referenceVelocity = self.repDetector.learnedPattern?.avgPeakVelocity {
+                let meanString = String(format: "%.3f", self.meanVelocity)
+                let referenceString = String(format: "%.3f", referenceVelocity)
+                print("🔍 Debug: Mean velocity rep #\(self.repCount): \(meanString) m/s (ref ≈ \(referenceString) m/s)")
+            }
+
             // Check velocity loss
             if SettingsManager.shared.stopOnVelocityLoss &&
                self.velocityLoss >= SettingsManager.shared.velocityLossThreshold {
@@ -283,24 +311,26 @@ class TrainingSessionManager: ObservableObject {
     }
     
     private func resetMetrics() {
-        velocity = 0.0
+        integratedVelocity = 0.0
         currentVelocity = 0.0
         peakVelocity = 0.0
         meanVelocity = 0.0
         velocityLoss = 0.0
         repCount = 0
-        
+
         isMoving = false
         phase = .idle
         inConcentricPhase = false
         concentricPeakReached = false
         lastRepTime = nil
         movementStartTime = nil
-        
+
         repPeakVelocities.removeAll()
         firstRepPeakVelocity = nil
+        lastRepPeakVelocity = 0.0
+        lastRepInTarget = true
         currentZone = .tooSlow
-        
+
         repDetector.reset()
     }
 }
