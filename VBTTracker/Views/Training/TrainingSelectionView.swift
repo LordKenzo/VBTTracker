@@ -46,7 +46,7 @@ struct TrainingSelectionView: View {
             .navigationTitle("Setup Allenamento")
             .navigationBarTitleDisplayMode(.inline)
             .sheet(isPresented: $showCalibration) {
-                ROMCalibrationView(
+                CalibrationModeSelectionView(
                     calibrationManager: calibrationManager,
                     bleManager: bleManager
                 )

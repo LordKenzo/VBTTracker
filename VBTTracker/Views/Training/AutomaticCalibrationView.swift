@@ -1,13 +1,21 @@
 //
-//  ROMCalibrationView.swift
+//  AutomaticCalibrationView.swift
 //  VBTTracker
 //
-//  UI per calibrazione ROM e pattern learning
+//  Created by Lorenzo Franceschini on 19/10/25.
+//
+
+
+//
+//  AutomaticCalibrationView.swift
+//  VBTTracker
+//
+//  UI per calibrazione automatica (2 rep)
 //
 
 import SwiftUI
 
-struct ROMCalibrationView: View {
+struct AutomaticCalibrationView: View {
     @ObservedObject var calibrationManager: ROMCalibrationManager
     @ObservedObject var bleManager: BLEManager
     @Environment(\.dismiss) var dismiss
@@ -15,7 +23,7 @@ struct ROMCalibrationView: View {
     @State private var dataStreamTimer: Timer?
     
     var body: some View {
-        NavigationView {
+        NavigationStack {
             ZStack {
                 // Background gradient
                 LinearGradient(
@@ -31,7 +39,7 @@ struct ROMCalibrationView: View {
                         headerSection
                         
                         // State-based content
-                        switch calibrationManager.calibrationState {
+                        switch calibrationManager.automaticState {
                         case .idle:
                             setupInstructions
                         case .waitingForFirstRep, .detectingReps:
@@ -52,7 +60,7 @@ struct ROMCalibrationView: View {
                     .padding()
                 }
             }
-            .navigationTitle("Calibrazione ROM")
+            .navigationTitle("Calibrazione Automatica")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
@@ -159,7 +167,7 @@ struct ROMCalibrationView: View {
                 }
             }
             
-            // Live acceleration graph (mini version)
+            // Live acceleration
             if bleManager.isConnected {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Accelerazione Live")
@@ -211,7 +219,6 @@ struct ROMCalibrationView: View {
     private var loadBarbellView: some View {
         VStack(spacing: 20) {
             if let pattern = calibrationManager.learnedPattern {
-                // Risultati calibrazione
                 VStack(alignment: .leading, spacing: 12) {
                     Text("✅ Pattern Appreso")
                         .font(.title3)
@@ -229,7 +236,6 @@ struct ROMCalibrationView: View {
                 .cornerRadius(12)
             }
             
-            // Istruzioni caricamento
             VStack(spacing: 12) {
                 Image(systemName: "figure.strengthtraining.traditional")
                     .font(.system(size: 50))
@@ -312,9 +318,9 @@ struct ROMCalibrationView: View {
     
     private var actionButtons: some View {
         VStack(spacing: 12) {
-            if calibrationManager.calibrationState == .idle {
+            if calibrationManager.automaticState == .idle {
                 Button(action: {
-                    calibrationManager.startCalibration()
+                    calibrationManager.startAutomaticCalibration()
                 }) {
                     Label("Inizia Calibrazione", systemImage: "play.circle.fill")
                         .frame(maxWidth: .infinity)
@@ -324,6 +330,7 @@ struct ROMCalibrationView: View {
                 
                 Button(action: {
                     calibrationManager.skipCalibration()
+                    dismiss()
                 }) {
                     Text("Salta (usa impostazioni default)")
                         .frame(maxWidth: .infinity)
@@ -332,8 +339,8 @@ struct ROMCalibrationView: View {
                 .controlSize(.large)
             }
             
-            if calibrationManager.calibrationState == .detectingReps ||
-               calibrationManager.calibrationState == .waitingForFirstRep {
+            if calibrationManager.automaticState == .detectingReps ||
+                calibrationManager.automaticState == .waitingForFirstRep {
                 Button(action: {
                     calibrationManager.reset()
                 }) {
@@ -344,10 +351,10 @@ struct ROMCalibrationView: View {
                 .controlSize(.large)
             }
             
-            if case .failed = calibrationManager.calibrationState {
+            if case .failed = calibrationManager.automaticState {
                 Button(action: {
                     calibrationManager.reset()
-                    calibrationManager.startCalibration()
+                    calibrationManager.startAutomaticCalibration()
                 }) {
                     Label("Riprova", systemImage: "arrow.clockwise")
                         .frame(maxWidth: .infinity)
@@ -361,47 +368,31 @@ struct ROMCalibrationView: View {
     // MARK: - Helpers
     
     private var calibrationIcon: String {
-        switch calibrationManager.calibrationState {
-        case .idle:
-            return "figure.mind.and.body"
-        case .waitingForFirstRep, .detectingReps:
-            return "figure.strengthtraining.traditional"
-        case .analyzing:
-            return "brain.head.profile"
-        case .waitingForLoad:
-            return "figure.cooldown"
-        case .completed:
-            return "checkmark.circle.fill"
-        case .failed:
-            return "exclamationmark.triangle.fill"
+        switch calibrationManager.automaticState {
+        case .idle: return "figure.mind.and.body"
+        case .waitingForFirstRep, .detectingReps: return "figure.strengthtraining.traditional"
+        case .analyzing: return "brain.head.profile"
+        case .waitingForLoad: return "figure.cooldown"
+        case .completed: return "checkmark.circle.fill"
+        case .failed: return "exclamationmark.triangle.fill"
         }
     }
     
     private var calibrationColor: Color {
-        switch calibrationManager.calibrationState {
-        case .idle:
-            return .blue
-        case .waitingForFirstRep, .detectingReps:
-            return .orange
-        case .analyzing:
-            return .purple
-        case .waitingForLoad:
-            return .cyan
-        case .completed:
-            return .green
-        case .failed:
-            return .red
+        switch calibrationManager.automaticState {
+        case .idle: return .blue
+        case .waitingForFirstRep, .detectingReps: return .orange
+        case .analyzing: return .purple
+        case .waitingForLoad: return .cyan
+        case .completed: return .green
+        case .failed: return .red
         }
     }
     
     private func accelColor(_ value: Double) -> Color {
-        if abs(value) < 0.2 {
-            return .gray
-        } else if value > 0 {
-            return .green
-        } else {
-            return .red
-        }
+        if abs(value) < 0.2 { return .gray }
+        else if value > 0 { return .green }
+        else { return .red }
     }
     
     // MARK: - Data Stream
@@ -412,8 +403,7 @@ struct ROMCalibrationView: View {
         dataStreamTimer = Timer.scheduledTimer(withTimeInterval: 0.02, repeats: true) { _ in
             let accZ = bleManager.acceleration[2]
             let timestamp = Date()
-            
-            calibrationManager.processSample(accZ: accZ, timestamp: timestamp)
+            calibrationManager.processAutomaticSample(accZ: accZ, timestamp: timestamp)
         }
     }
     
@@ -423,53 +413,9 @@ struct ROMCalibrationView: View {
     }
 }
 
-// MARK: - Supporting Views
-
-struct PatternRow: View {
-    let label: String
-    let value: String
-    
-    var body: some View {
-        HStack {
-            Text(label)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            
-            Spacer()
-            
-            Text(value)
-                .font(.headline)
-                .foregroundStyle(.white)
-        }
-    }
-}
-
-struct StatBadge: View {
-    let label: String
-    let value: String
-    
-    var body: some View {
-        VStack(spacing: 4) {
-            Text(value)
-                .font(.title3)
-                .fontWeight(.bold)
-                .foregroundStyle(.white)
-            
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .padding()
-        .background(Color.white.opacity(0.1))
-        .cornerRadius(12)
-    }
-}
-
-// MARK: - Preview
-
 #Preview {
-    ROMCalibrationView(
-        calibrationManager: ROMCalibrationManager(),
+    AutomaticCalibrationView(
+        calibrationManager: .previewAutomatic,
         bleManager: BLEManager()
     )
 }

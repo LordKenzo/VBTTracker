@@ -50,8 +50,8 @@ class TrainingSessionManager: ObservableObject {
     private var movementStartTime: Date?
     
     // Rep data storage
-    private var repPeakVelocities: [Double] = []
-    private var firstRepPeakVelocity: Double?
+    var repPeakVelocities: [Double] = []
+    var firstRepPeakVelocity: Double?
     
     // Constants
     private let dt: Double = 0.02 // 20ms sampling
