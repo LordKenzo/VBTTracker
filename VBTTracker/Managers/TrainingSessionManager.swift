@@ -35,33 +35,13 @@ class TrainingSessionManager: ObservableObject {
     var targetZone: TrainingZone = .strength
     
     // MARK: - Private Properties
-    
-    private var velocity: Double = 0.0
-    private var isMoving = false
-    private var phase: MovementPhase = .idle
-    
+
     let repDetector = VBTRepDetector()
     private let voiceFeedback = VoiceFeedbackManager()
 
-
-    private var inConcentricPhase = false
-    private var concentricPeakReached = false
-    private var lastRepTime: Date?
-    private var movementStartTime: Date?
-    
     // Rep data storage
     var repPeakVelocities: [Double] = []
     var firstRepPeakVelocity: Double?
-    
-    // Constants
-    private let dt: Double = 0.02 // 20ms sampling
-    // private let movementThreshold: Double = 2.5 // m/s²
-    
-    enum MovementPhase {
-        case idle
-        case concentric
-        case eccentric
-    }
     
     // MARK: - Public Methods
     
@@ -177,27 +157,6 @@ class TrainingSessionManager: ObservableObject {
     
     // MARK: - Private Methods
     
-    private func handlePhaseChange(_ phase: VBTRepDetector.Phase) {
-        DispatchQueue.main.async {
-            switch phase {
-            case .descending:
-                if self.repCount == 0 && !self.repDetector.hasAnnouncedUnrack {
-                    self.voiceFeedback.announceBarUnrack()
-                }
-                /*else {
-                    self.voiceFeedback.announceEccentric()
-                }*/
-                
-            case .ascending:
-                break;
-                //self.voiceFeedback.announceConcentric()
-                
-            case .idle, .completed:
-                break
-            }
-        }
-    }
-
     private func countRep(peakVelocity: Double) {
         repPeakVelocities.append(peakVelocity)
         
@@ -283,20 +242,12 @@ class TrainingSessionManager: ObservableObject {
     }
     
     private func resetMetrics() {
-        velocity = 0.0
         currentVelocity = 0.0
         peakVelocity = 0.0
         meanVelocity = 0.0
         velocityLoss = 0.0
         repCount = 0
-        
-        isMoving = false
-        phase = .idle
-        inConcentricPhase = false
-        concentricPeakReached = false
-        lastRepTime = nil
-        movementStartTime = nil
-        
+
         repPeakVelocities.removeAll()
         firstRepPeakVelocity = nil
         currentZone = .tooSlow
