@@ -56,8 +56,6 @@ class TrainingSessionManager: ObservableObject {
     // Constants
     private let defaultSampleInterval: Double = 0.02 // 20ms sampling
     private let maxReasonableVelocity: Double = 5.0 // m/s guardrail
-
-    private var lastSampleTime: Date?
     // private let movementThreshold: Double = 2.5 // m/s²
     
     enum MovementPhase {
@@ -71,8 +69,6 @@ class TrainingSessionManager: ObservableObject {
     func startRecording() {
         isRecording = true
         resetMetrics()
-
-        lastSampleTime = nil
 
         // ✅ NUOVO: Logga se pattern appreso è disponibile
         if let pattern = repDetector.learnedPattern {
@@ -123,7 +119,6 @@ class TrainingSessionManager: ObservableObject {
         // Reset integratore per evitare drift tra sessioni
         integratedVelocity = 0.0
         currentVelocity = 0.0
-        lastSampleTime = nil
     }
 
     
@@ -149,41 +144,18 @@ class TrainingSessionManager: ObservableObject {
         repDetector.velocityMode = SettingsManager.shared.velocityMeasurementMode
 
         // 3. Rileva rep
-        let timestamp = Date()
         let result = repDetector.addSample(
             accZ: accelNoGravity,
-            timestamp: timestamp
+            timestamp: Date()
         )
 
         // 4. Integra accelerazione filtrata per ottenere la velocità in m/s
         let filteredAcceleration = result.currentValue
 
-        let deltaTime: Double
-        if let lastTime = lastSampleTime {
-            let measuredDt = timestamp.timeIntervalSince(lastTime)
-            deltaTime = min(max(measuredDt, 0.005), 0.05)
-        } else {
-            deltaTime = defaultSampleInterval
-        }
-        lastSampleTime = timestamp
+        let linearAcceleration = filteredAcceleration * 9.81 // g → m/s²
+        integratedVelocity += linearAcceleration * defaultSampleInterval
 
-        var linearAcceleration = filteredAcceleration * 9.81
-
-        // Piccolo filtro anti-rumore: ignora accelerazioni molto piccole
-        if abs(linearAcceleration) < 0.15 {
-            linearAcceleration = 0.0
-        }
-
-        integratedVelocity += linearAcceleration * deltaTime
-
-        // Smorza lentamente per ridurre drift quando il sensore è fermo
-        if abs(linearAcceleration) < 0.2 {
-            integratedVelocity *= 0.98
-            if abs(integratedVelocity) < 0.02 {
-                integratedVelocity = 0.0
-            }
-        }
-
+        // Limita eventuale drift dovuto a rumore o saturazione
         integratedVelocity = max(-maxReasonableVelocity, min(maxReasonableVelocity, integratedVelocity))
         let velocityMagnitude = abs(integratedVelocity)
 
@@ -359,6 +331,5 @@ class TrainingSessionManager: ObservableObject {
         currentZone = .tooSlow
 
         repDetector.reset()
-        lastSampleTime = nil
     }
 }
