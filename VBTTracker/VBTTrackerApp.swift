@@ -11,7 +11,7 @@ import SwiftUI
 struct VBTTrackerApp: App {
     var body: some Scene {
         WindowGroup {
-            HomeView()  // ⭐ UPDATED: Use HomeView instead of SensorConnectionView
+            HomeView()
         }
     }
 }
