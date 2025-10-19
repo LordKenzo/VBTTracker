@@ -109,11 +109,15 @@ class TrainingSessionManager: ObservableObject {
     func stopRecording() {
         isRecording = false
         calculateFinalMetrics()
-        
+
         // Annuncia fine
         voiceFeedback.announceWorkoutEnd(reps: repCount)
-        
+
         print("⏹️ Sessione terminata - Reps: \(repCount), Mean: \(String(format: "%.3f", meanVelocity)) m/s")
+
+        // Reset integratore per evitare drift tra sessioni
+        velocity = 0.0
+        currentVelocity = 0.0
     }
 
     
@@ -134,6 +138,11 @@ class TrainingSessionManager: ObservableObject {
         } else {
             accelNoGravity = accelZ - 1.0
         }
+
+        // Convert to m/s² and integrate with fixed dt (20 ms sampling)
+        let linearAcceleration = accelNoGravity * 9.81
+        velocity += linearAcceleration * dt
+        let velocityMagnitude = abs(velocity)
         
         // 2. Passa modalità velocità al detector
         repDetector.velocityMode = SettingsManager.shared.velocityMeasurementMode
@@ -152,14 +161,20 @@ class TrainingSessionManager: ObservableObject {
         // 5. AGGIORNA ZONA CORRENTE (basata su velocità corrente o picco)
         DispatchQueue.main.async {
             // Usa currentVelocity se disponibile, altrimenti peakVelocity
-            let velocityForZone = self.currentVelocity > 0.1 ? self.currentVelocity : self.peakVelocity
-            
+            let velocityForZone: Double
+
+            if velocityMagnitude > 0.1 {
+                velocityForZone = velocityMagnitude
+            } else {
+                velocityForZone = self.peakVelocity
+            }
+
             if velocityForZone > 0.1 {
                 self.currentZone = SettingsManager.shared.getTrainingZone(for: velocityForZone)
             }
-            
-            // Aggiorna anche currentVelocity con valore smoothed
-            self.currentVelocity = abs(result.currentValue) * 9.81 // g → m/s²
+
+            // Aggiorna velocità corrente con l'integrata (m/s)
+            self.currentVelocity = velocityMagnitude
             
             // Aggiorna peakVelocity durante la rep
             if let peakVel = result.peakVelocity, peakVel > self.peakVelocity {
@@ -213,10 +228,14 @@ class TrainingSessionManager: ObservableObject {
             self.lastRepInTarget = isInTarget
             self.calculateMeanVelocity()
             self.calculateVelocityLoss()
-            
+
             // Annuncia rep completata
             self.voiceFeedback.announceRep(number: self.repCount, isInTarget: isInTarget)
-            
+
+            if let referenceVelocity = self.repDetector.learnedPattern?.avgPeakVelocity {
+                print("🔍 Debug: Mean velocity rep #\(self.repCount): \(String(format: "%.3f", self.meanVelocity)) m/s (ref ≈ \(String(format: "%.3f", referenceVelocity)) m/s)")
+            }
+
             // Check velocity loss
             if SettingsManager.shared.stopOnVelocityLoss &&
                self.velocityLoss >= SettingsManager.shared.velocityLossThreshold {
