@@ -17,8 +17,8 @@ import SwiftUI
 
 struct HomeView: View {
     @StateObject private var bleManager = BLEManager()
-    @StateObject private var calibrationManager = CalibrationManager()
     @ObservedObject var settings = SettingsManager.shared
+    @StateObject private var calibrationManager = CalibrationManager()
     
     @State private var showSettings = false
     
@@ -158,8 +158,7 @@ struct HomeView: View {
             
             // Start Training (main CTA)
             NavigationLink(destination: TrainingSelectionView(
-                bleManager: bleManager,
-                calibrationManager: calibrationManager
+                bleManager: bleManager
             )) {
                 HStack {
                     Image(systemName: "play.circle.fill")

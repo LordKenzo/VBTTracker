@@ -2,8 +2,8 @@
 //  VBTRepDetector.swift
 //  VBTTracker
 //
-//  Algoritmo VBT CORRETTO basato su letteratura scientifica
-//  Conta SOLO fase concentrica (salita/spinta)
+//  Algoritmo VBT ULTRA-SEMPLIFICATO
+//  "Vedo salita-discesa? È una REP!"
 //
 
 import Foundation
@@ -12,64 +12,95 @@ class VBTRepDetector {
     
     // MARK: - Configuration
     
-    /// Modalità misurazione velocità
     enum VelocityMeasurementMode {
-        case concentricOnly    // Standard VBT (solo fase concentrica)
-        case fullROM          // ROM completo (eccentrica + concentrica)
+        case concentricOnly
+        case fullROM
     }
     
     var velocityMode: VelocityMeasurementMode = .concentricOnly
     
-    /// ⭐ PARAMETRI ORA VENGONO DA SETTINGS (non più costanti hardcoded)
+    /// Pattern appreso da calibrazione (se disponibile)
+    var learnedPattern: LearnedPattern?
+    
+    // MARK: - Parametri ADATTIVI
+    
     private var windowSize: Int {
-        SettingsManager.shared.repSmoothingWindow
+        max(3, SettingsManager.shared.repSmoothingWindow)
     }
     
-    private var minConcentricAmplitude: Double {
-        SettingsManager.shared.repMinAmplitude
+    /// Ampiezza minima DINAMICA basata su pattern appreso
+    private var minAmplitude: Double {
+        if let pattern = learnedPattern {
+            // Usa pattern appreso (50% della media)
+            return pattern.dynamicMinAmplitude
+        } else if isInWarmup {
+            // Durante warmup: ultra-permissivo per imparare
+            return SettingsManager.shared.repMinAmplitude * 0.4
+        } else if let learned = learnedMinAmplitude {
+            // Dopo warmup: usa 50% della media appresa
+            return learned * 0.5
+        } else {
+            // Fallback
+            return SettingsManager.shared.repMinAmplitude * 0.5
+        }
     }
     
-    private var minTimeBetweenReps: TimeInterval {
-        SettingsManager.shared.repMinTimeBetween
+    /// Anti-doppio-conteggio
+    private var minTimeBetween: TimeInterval {
+        // Pattern appreso ha info sulla durata?
+        if let pattern = learnedPattern {
+            // Usa durata concentrica + buffer 30%
+            return pattern.avgConcentricDuration * 1.3
+        }
+        
+        // Fallback: 0.5s per forza, 0.3s per velocità
+        return 0.5
+    }
+    /// Soglia per decidere se è "fermo" o "si muove"
+    private var idleThreshold: Double {
+        learnedPattern?.restThreshold ?? 0.08
     }
     
-    private var minConcentricDuration: TimeInterval {
-        SettingsManager.shared.repMinDuration
-    }
+    /// Numero rep per warmup (se non c'è pattern appreso)
+    private let warmupReps: Int = 3
     
-    /// Soglia accelerazione per rilevare movimento attivo (m/s²)
-    private let activeMovementThreshold: Double = 3.0
-    
-    // MARK: - State
+    // MARK: - State Tracking
     
     private var samples: [AccelerationSample] = []
     private var smoothedValues: [Double] = []
     
-    private var currentPhase: Phase = .idle
+    // Tracking estremi locali
+    private var lastPeak: (value: Double, index: Int, time: Date)?
+    private var lastValley: (value: Double, index: Int, time: Date)?
     private var lastRepTime: Date?
     
+    private var isFirstMovement: Bool = true
+    
+    // Adaptive learning
+    private var repAmplitudes: [Double] = []  // Storia ampiezze rep valide
+    private var learnedMinAmplitude: Double?  // Soglia appresa
+    private var isInWarmup: Bool = true
+    private var lastMovementTime: Date?  // Ultimo movimento significativo
+    
     // Voice feedback
-    var hasAnnouncedUnrack = false  // ⭐ Reso pubblico (era private)
-    private var lastAnnouncedPhase: Phase = .idle
-    var onPhaseChange: ((Phase) -> Void)?  // ⭐ Callback per notificare cambio fase
-    
-    private var concentricStartValue: Double?
-    private var concentricStartTime: Date?
-    private var concentricPeakValue: Double = 0
-    private var concentricPeakTime: Date?
-    
-    // ⭐ Per modalità Full ROM
-    private var eccentricStartValue: Double?
-    private var eccentricStartTime: Date?
-    private var totalROMStartValue: Double?
-    private var totalROMStartTime: Date?
+    var hasAnnouncedUnrack = false
+    private var lastAnnouncedDirection: Direction = .none
+    var onPhaseChange: ((Phase) -> Void)?
     
     enum Phase {
-        case idle              // Fermo (su rack o inizio)
-        case eccentric         // Discesa (al petto)
-        case concentric        // Salita (spinta) ⭐ QUESTA È LA REP
-        case returnToRack      // Ritorno a rack (dopo completamento)
+        case idle
+        case descending
+        case ascending
+        case completed
     }
+    
+    private enum Direction {
+        case none
+        case up      // Sta salendo
+        case down    // Sta scendendo
+    }
+    
+    private var currentDirection: Direction = .none
     
     // MARK: - Public Methods
     
@@ -88,29 +119,235 @@ class VBTRepDetector {
             smoothedValues.removeFirst()
         }
         
-        return detectConcentricPhase()
+        return detectRepSimple()
     }
     
     func reset() {
         samples.removeAll()
         smoothedValues.removeAll()
-        currentPhase = .idle
+        lastPeak = nil
+        lastValley = nil
         lastRepTime = nil
-        concentricStartValue = nil
-        concentricPeakValue = 0
-        eccentricStartValue = nil
-        eccentricStartTime = nil
-        totalROMStartValue = nil
-        totalROMStartTime = nil
+        currentDirection = .none
         hasAnnouncedUnrack = false
-        lastAnnouncedPhase = .idle
+        lastAnnouncedDirection = .none
+        
+        // Reset adaptive learning
+        repAmplitudes.removeAll()
+        learnedMinAmplitude = nil
+        isInWarmup = true
+        lastMovementTime = nil
+        
+        isFirstMovement = true
     }
     
     func getSamples() -> [AccelerationSample] {
         return samples
     }
     
-    // MARK: - Private Methods
+    // MARK: - ALGORITMO SEMPLIFICATO
+    
+    /// Logica: Conta OGNI pattern "picco → valle → picco"
+    private func detectRepSimple() -> RepDetectionResult {
+        guard smoothedValues.count >= 5 else {
+            return RepDetectionResult(repDetected: false, currentValue: 0, peakVelocity: nil)
+        }
+        
+        let current = smoothedValues.last!
+        let currentIndex = smoothedValues.count - 1
+        let timestamp = Date()
+        
+        // 1️⃣ Determina DIREZIONE attuale
+        let newDirection = detectDirection()
+        
+        var repDetected = false
+        var peakVelocity: Double?
+        
+        // 2️⃣ Rileva INVERSIONI di direzione
+        
+        if newDirection != currentDirection && newDirection != .none {
+            
+            // INVERSIONE VERSO IL BASSO (abbiamo appena passato un PICCO)
+            if newDirection == .down && currentDirection == .up {
+                let peakValue = findRecentMax(lookback: 3)
+                lastPeak = (peakValue, currentIndex, timestamp)
+                
+                print("🔴 PICCO a \(String(format: "%.2f", peakValue))g")
+                
+                // Voice: discesa (solo se non l'abbiamo già detto)
+                if lastAnnouncedDirection != .down {
+                    if !hasAnnouncedUnrack && lastValley == nil {
+                        hasAnnouncedUnrack = true
+                        onPhaseChange?(.descending)
+                    }
+                    lastAnnouncedDirection = .down
+                }
+            }
+            
+            // INVERSIONE VERSO L'ALTO (abbiamo appena passato una VALLE)
+            else if newDirection == .up && currentDirection == .down {
+                let valleyValue = findRecentMin(lookback: 3)
+                lastValley = (valleyValue, currentIndex, timestamp)
+                
+                print("🔵 VALLE a \(String(format: "%.2f", valleyValue))g")
+                
+                // Voice: salita
+                if lastAnnouncedDirection != .up {
+                    onPhaseChange?(.ascending)
+                    lastAnnouncedDirection = .up
+                }
+                
+                // ✅ CONTA REP: Se abbiamo pattern PICCO → VALLE → ora risale
+                if let peak = lastPeak, let valley = lastValley {
+                    
+                    // ✅ FIX: Ignora il primo movimento (stacco)
+                    if isFirstMovement {
+                        print("⚠️ Primo movimento ignorato (stacco dal rack)")
+                        isFirstMovement = false
+                        lastPeak = nil  // Reset per iniziare pattern pulito
+                        return RepDetectionResult(
+                            repDetected: false,
+                            currentValue: current,
+                            peakVelocity: nil
+                        )
+                    }
+                    
+                    // Validazione MINIMA
+                    let amplitude = peak.value - valley.value
+                    let timeSinceLast = lastRepTime?.timeIntervalSinceNow ?? -1.0
+                    let validTiming = abs(timeSinceLast) > minTimeBetween || lastRepTime == nil
+                    let validAmplitude = amplitude >= minAmplitude * 1.2  // 20% più restrittivo
+
+                    
+                    // 🧠 FILTRO INTELLIGENTE: Ignora micro-movimenti dopo inattività
+                    let timeSinceMovement = lastMovementTime?.timeIntervalSinceNow ?? 0
+                    let isAfterLongPause = abs(timeSinceMovement) > 2.0
+                    
+                    // Se sono fermo da > 2s, richiedi ampiezza maggiore (anti-rumore fine serie)
+                    let amplitudeThreshold = isAfterLongPause ? minAmplitude * 1.5 : minAmplitude
+                    
+                    // CONTA se: ampiezza OK + timing OK
+                    if amplitude >= amplitudeThreshold && validTiming {
+                        
+                        // Calcola velocità
+                        let duration = valley.time.timeIntervalSince(peak.time)
+                        peakVelocity = estimateVelocity(amplitude: amplitude, duration: abs(duration))
+                        
+                        repDetected = true
+                        lastRepTime = timestamp
+                        lastMovementTime = timestamp
+                        
+                        // 🎓 LEARNING: Impara dalle prime rep
+                        repAmplitudes.append(amplitude)
+                        if repAmplitudes.count == warmupReps {
+                            learnedMinAmplitude = repAmplitudes.reduce(0, +) / Double(warmupReps)
+                            isInWarmup = false
+                            print("🎓 Warmup completato - Soglia appresa: \(String(format: "%.2f", learnedMinAmplitude!))g")
+                        }
+                        
+                        // Marca picco sul grafico
+                        if peak.index < samples.count {
+                            samples[peak.index].isPeak = true
+                        }
+                        
+                        let phase = isInWarmup ? "WARMUP" : "ACTIVE"
+                        print("✅ REP [\(phase)] - Amp: \(String(format: "%.2f", amplitude))g, " +
+                              "Vel: \(String(format: "%.2f", peakVelocity!)) m/s")
+                        
+                    } else {
+                        let reason = !validTiming ? "anti-rimbalzo (\(String(format: "%.2f", abs(timeSinceLast)))s)" :
+                                    isAfterLongPause ? "micro-movimento dopo pausa (amp \(String(format: "%.2f", amplitude))g < \(String(format: "%.2f", amplitudeThreshold))g)" :
+                                    "ampiezza troppo bassa (\(String(format: "%.2f", amplitude))g)"
+                        print("⚠️ Pattern ignorato: \(reason)")
+                    }
+                    
+                    // Reset peak per prossimo ciclo
+                    lastPeak = nil
+                }
+            }
+            
+            currentDirection = newDirection
+        }
+        
+        return RepDetectionResult(
+            repDetected: repDetected,
+            currentValue: current,
+            peakVelocity: peakVelocity
+        )
+    }
+    
+    // MARK: - Helper: Direction Detection
+    
+    /// Rileva se il segnale sta salendo, scendendo o è piatto
+    private func detectDirection() -> Direction {
+        guard smoothedValues.count >= 4 else { return .none }
+        
+        let last4 = Array(smoothedValues.suffix(4))
+        
+        // Aggiorna timestamp ultimo movimento significativo
+        if last4.last! > idleThreshold || last4.last! < -idleThreshold {
+            lastMovementTime = Date()
+        }
+        
+        // Calcola trend medio (quante volte sale vs scende)
+        var ups = 0
+        var downs = 0
+        
+        for i in 1..<last4.count {
+            let delta = last4[i] - last4[i-1]
+            if delta > 0.03 { ups += 1 }       // Soglia rumore: 0.03g
+            else if delta < -0.03 { downs += 1 }
+        }
+        
+        // Decidi direzione
+        if ups >= 2 && ups > downs { return .up }
+        if downs >= 2 && downs > ups { return .down }
+        
+        return currentDirection  // Mantieni direzione precedente se incerto
+    }
+    
+    /// Trova massimo negli ultimi N campioni
+    private func findRecentMax(lookback: Int) -> Double {
+        guard smoothedValues.count >= lookback else {
+            return smoothedValues.last ?? 0
+        }
+        return smoothedValues.suffix(lookback).max() ?? 0
+    }
+    
+    /// Trova minimo negli ultimi N campioni
+    private func findRecentMin(lookback: Int) -> Double {
+        guard smoothedValues.count >= lookback else {
+            return smoothedValues.last ?? 0
+        }
+        return smoothedValues.suffix(lookback).min() ?? 0
+    }
+    
+    // MARK: - Helper: Velocity Estimation
+    
+    private func estimateVelocity(amplitude: Double, duration: Double) -> Double {
+        // ROM stimato in base ad ampiezza
+        let estimatedROM: Double
+        if amplitude < 0.4 {
+            estimatedROM = 0.20  // Movimento parziale
+        } else if amplitude < 0.7 {
+            estimatedROM = 0.45  // Panca standard
+        } else if amplitude < 1.0 {
+            estimatedROM = 0.60  // Movimento ampio
+        } else {
+            estimatedROM = 0.75  // Squat completo
+        }
+        
+        // Velocità media: v = s / t
+        if duration > 0.05 {
+            return estimatedROM / duration
+        } else {
+            // Fallback: formula cinematica v = sqrt(2*a*s)
+            let accelMS2 = amplitude * 9.81
+            return sqrt(2.0 * accelMS2 * estimatedROM)
+        }
+    }
+    
+    // MARK: - Helper: Smoothing
     
     private func calculateMovingAverage() -> Double {
         guard samples.count >= windowSize else {
@@ -121,217 +358,6 @@ class VBTRepDetector {
         let sum = window.reduce(0.0) { $0 + $1.accZ }
         return sum / Double(windowSize)
     }
-    
-    /// ⭐ ALGORITMO VBT CORRETTO
-    private func detectConcentricPhase() -> RepDetectionResult {
-        guard smoothedValues.count >= 3 else {
-            return RepDetectionResult(
-                repDetected: false,
-                currentValue: samples.last?.accZ ?? 0,
-                peakVelocity: nil
-            )
-        }
-        
-        let current = smoothedValues[smoothedValues.count - 1]
-        let previous = smoothedValues[smoothedValues.count - 2]
-        let beforePrevious = smoothedValues[smoothedValues.count - 3]
-        
-        var repDetected = false
-        var peakVelocity: Double = 0
-        
-        // 1️⃣ RILEVA INIZIO ECCENTRICA (discesa significativa)
-        if currentPhase == .idle || currentPhase == .returnToRack {
-            // ⭐ Usa soglia da Settings (configurabile)
-            let eccentricThreshold = -SettingsManager.shared.repEccentricThreshold
-            
-            if current < eccentricThreshold && current < previous {
-                
-                // ⭐ CAMBIO FASE: da idle/rack → eccentrica
-                let wasIdle = (currentPhase == .idle || currentPhase == .returnToRack)
-                currentPhase = .eccentric
-                
-                // ⭐ VOICE: Prima eccentrica = "Stacco", altre = "Eccentrica"
-                if wasIdle {
-                    if !hasAnnouncedUnrack {
-                        hasAnnouncedUnrack = true
-                        print("🔊 Annuncio: Stacco del bilanciere")
-                        onPhaseChange?(.eccentric)  // ← Callback "stacco"
-                    } else if lastAnnouncedPhase != .eccentric {
-                        print("🔊 Annuncio: Eccentrica")
-                        onPhaseChange?(.eccentric)  // ← Callback "eccentrica"
-                        lastAnnouncedPhase = .eccentric
-                    }
-                }
-                
-                // ⭐ Per Full ROM: registra inizio movimento totale
-                if velocityMode == .fullROM {
-                    eccentricStartValue = current
-                    eccentricStartTime = Date()
-                    totalROMStartValue = current
-                    totalROMStartTime = Date()
-                }
-                
-                print("📉 ECCENTRICA iniziata (discesa sotto \(String(format: "%.2f", eccentricThreshold))g)")
-            }
-        }
-        
-        // 2️⃣ RILEVA INIZIO CONCENTRICA (inversione del movimento)
-        if currentPhase == .eccentric {
-            // Rileva valle (punto più basso = petto)
-            if previous < beforePrevious && previous < current {
-                // Valle trovata = INIZIO CONCENTRICA
-                currentPhase = .concentric
-                concentricStartValue = previous
-                concentricStartTime = Date()
-                concentricPeakValue = previous
-                
-                // ⭐ VOICE: Annuncia "Concentrica" IMMEDIATAMENTE
-                if lastAnnouncedPhase != .concentric {
-                    print("🔊 Annuncio: Concentrica")
-                    onPhaseChange?(.concentric)  // ← Callback "concentrica"
-                    lastAnnouncedPhase = .concentric
-                }
-                
-                print("🟢 CONCENTRICA iniziata - Start: \(String(format: "%.2f", previous))g")
-            }
-        }
-        
-        // 3️⃣ MONITORA FASE CONCENTRICA (salita)
-        if currentPhase == .concentric {
-            // Aggiorna picco se stiamo salendo
-            if current > concentricPeakValue {
-                concentricPeakValue = current
-                concentricPeakTime = Date()
-            }
-            
-            // Rileva FINE CONCENTRICA (picco raggiunto e inizia discesa)
-            if previous > beforePrevious && previous > current {
-                // Picco trovato = FINE CONCENTRICA = ✅ CONTA REP
-                
-                guard let startValue = concentricStartValue else {
-                    currentPhase = .returnToRack
-                    return RepDetectionResult(
-                        repDetected: false,
-                        currentValue: current,
-                        peakVelocity: nil
-                    )
-                }
-                
-                let amplitude = concentricPeakValue - startValue
-                let duration = concentricPeakTime?.timeIntervalSince(concentricStartTime ?? Date()) ?? 0
-                
-                // ⭐ Calcola velocità in base alla modalità
-                let velocity: Double
-                let velocityLabel: String
-                
-                switch velocityMode {
-                case .concentricOnly:
-                    // Standard VBT: solo fase concentrica
-                    velocity = calculateVelocity(
-                        amplitude: amplitude,
-                        duration: duration
-                    )
-                    velocityLabel = "Concentrica"
-                    
-                case .fullROM:
-                    // Full ROM: da inizio eccentrica a fine concentrica
-                    if let totalStart = totalROMStartValue,
-                       let totalStartTime = totalROMStartTime {
-                        let totalAmplitude = concentricPeakValue - totalStart
-                        let totalDuration = Date().timeIntervalSince(totalStartTime)
-                        velocity = calculateVelocity(
-                            amplitude: abs(totalAmplitude),
-                            duration: totalDuration
-                        )
-                        velocityLabel = "Full ROM"
-                    } else {
-                        // Fallback
-                        velocity = calculateVelocity(amplitude: amplitude, duration: duration)
-                        velocityLabel = "Concentrica (fallback)"
-                    }
-                }
-                
-                // Validazione
-                let timeSinceLastRep = lastRepTime?.timeIntervalSinceNow ?? -1.0
-                let validTiming = abs(timeSinceLastRep) > minTimeBetweenReps || lastRepTime == nil
-                let validAmplitude = amplitude >= minConcentricAmplitude
-                let validDuration = duration >= minConcentricDuration  // ⭐ NUOVO
-                
-                if validAmplitude && validTiming && validDuration {
-                    // ✅ REP VALIDA
-                    peakVelocity = velocity
-                    
-                    repDetected = true
-                    lastRepTime = Date()
-                    
-                    // Marca picco
-                    if samples.count >= 2 {
-                        samples[samples.count - 2].isPeak = true
-                    }
-                    
-                    print("✅ REP [\(velocityLabel)] - Ampiezza: \(String(format: "%.2f", amplitude))g, Durata: \(String(format: "%.2f", duration))s, Velocità: \(String(format: "%.2f", velocity)) m/s")
-                    
-                    // Passa a fase eccentrica (o ritorno rack)
-                    currentPhase = .eccentric
-                } else {
-                    let reason = !validAmplitude ? "ampiezza < \(minConcentricAmplitude)g" :
-                                !validTiming ? "timing < \(minTimeBetweenReps)s" :
-                                !validDuration ? "durata < \(minConcentricDuration)s (\(String(format: "%.2f", duration))s)" :
-                                "sconosciuto"
-                    print("⚠️ Rep ignorata - \(reason)")
-                    currentPhase = .returnToRack
-                }
-                
-                // Reset per prossima rep
-                concentricStartValue = nil
-                concentricPeakValue = 0
-                totalROMStartValue = nil  // ⭐ Reset anche per Full ROM
-            }
-        }
-        
-        // 4️⃣ RILEVA RITORNO A IDLE (bilanciere fermo su rack)
-        if abs(current) < 0.1 && abs(previous) < 0.1 {
-            if currentPhase != .idle {
-                print("⏸️  Ritorno a IDLE (rack)")
-            }
-            currentPhase = .idle
-        }
-        
-        return RepDetectionResult(
-            repDetected: repDetected,
-            currentValue: current,
-            peakVelocity: repDetected ? peakVelocity : nil
-        )
-    }
-    
-    /// Calcola velocità media propulsiva (MPV)
-    /// Basato su v = sqrt(2 * a * s) e considerando durata
-    private func calculateVelocity(amplitude: Double, duration: Double) -> Double {
-        // Converti ampiezza da g a m/s²
-        let accelMS2 = amplitude * 9.81
-        
-        // Stima distanza ROM (Range of Motion)
-        // Panca piana: ~50cm, Squat: ~70cm
-        let estimatedROM: Double
-        if amplitude < 0.6 {
-            estimatedROM = 0.3  // Movimento corto
-        } else if amplitude < 1.0 {
-            estimatedROM = 0.5  // Movimento medio (panca)
-        } else {
-            estimatedROM = 0.7  // Movimento lungo (squat)
-        }
-        
-        // Velocità media: v_avg = distance / time
-        if duration > 0.1 {
-            return estimatedROM / duration
-        } else {
-            // Fallback: formula cinematica
-            return sqrt(2.0 * abs(accelMS2) * estimatedROM)
-        }
-    }
-    
-    // ⭐ RIMUOVI questo metodo (non serve più)
-    // private func notifyPhaseChange(...) { ... }
 }
 
 // MARK: - Result Model

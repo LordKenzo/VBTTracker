@@ -28,28 +28,29 @@ class VoiceFeedbackManager: NSObject, ObservableObject {
     /// Feedback: Stacco bilanciere
     func announceBarUnrack() {
         guard settings.voiceFeedbackEnabled else { return }
-        speak("Stacco del bilanciere")
+        speak("Stacco")
     }
     
+    /*
     /// Feedback: Inizio fase concentrica
     func announceConcentric() {
         guard settings.voiceFeedbackEnabled else { return }
-        speak("Concentrica")
+        speak("Up")
     }
     
     /// Feedback: Inizio fase eccentrica
     func announceEccentric() {
         guard settings.voiceFeedbackEnabled else { return }
-        speak("Eccentrica")
+        speak("Down")
     }
-    
+    */
     /// Feedback: Rep completata
     func announceRep(number: Int, isInTarget: Bool) {
         guard settings.voiceFeedbackEnabled else { return }
         
         let message: String
         if number == 1 {
-            message = "1 rep"
+            message = "Una rep"
         } else {
             message = "\(number) reps"
         }

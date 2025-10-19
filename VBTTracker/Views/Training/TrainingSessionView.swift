@@ -10,7 +10,9 @@ import SwiftUI
 struct TrainingSessionView: View {
     @ObservedObject var bleManager: BLEManager
     let targetZone: TrainingZone
+    let targetReps: Int
     @ObservedObject var settings = SettingsManager.shared
+
     
     @StateObject private var sessionManager = TrainingSessionManager()
     @Environment(\.dismiss) var dismiss
@@ -83,20 +85,30 @@ struct TrainingSessionView: View {
         .navigationTitle("Allenamento")
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(sessionManager.isRecording)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarLeading) {
-                if sessionManager.isRecording {
-                    Button("Termina") {
-                        showEndSessionAlert = true
-                    }
-                    .foregroundStyle(.red)
-                    .fontWeight(.semibold)
+        .navigationBarItems(leading:
+            sessionManager.isRecording ?
+            AnyView(
+                Button("Termina") {
+                    showEndSessionAlert = true
                 }
-            }
-        }
+                .foregroundColor(.red)
+                .fontWeight(.semibold)
+            ) : AnyView(EmptyView())
+        )
         .onAppear {
             sessionManager.targetZone = targetZone
+            
+            // Carica pattern ROM
+            if let data = UserDefaults.standard.data(forKey: "learnedPattern"),
+               let pattern = try? JSONDecoder().decode(LearnedPattern.self, from: data) {
+                sessionManager.repDetector.learnedPattern = pattern
+                print("📂 Pattern ROM caricato: \(String(format: "%.0fcm", pattern.estimatedROM * 100))")
+            }
+            
             startDataStream()
+            
+            // ✅ AGGIUNGI: Avvia automaticamente la sessione
+            sessionManager.startRecording()
         }
         .onDisappear {
             stopDataStream()
@@ -108,56 +120,96 @@ struct TrainingSessionView: View {
                 dismiss()
             }
         } message: {
-            Text("La sessione verrà salvata. Ripetizioni: \(sessionManager.repCount)")
+            Text("Ripetizioni completate: \(sessionManager.repCount)/\(targetReps)")  // ✅ Mostra progresso
         }
     }
     
     // MARK: - 1. Reps + Target Card
+    private var progress: Double {
+        guard targetReps > 0 else { return 0 }
+        return min(Double(sessionManager.repCount) / Double(targetReps), 1.0)
+    }
+
+    private var progressColor: Color {
+        if progress < 0.3 {
+            return .orange
+        } else if progress < 0.7 {
+            return .yellow
+        } else if progress >= 1.0 {
+            return .green
+        } else {
+            return .blue
+        }
+    }
     
     private var repsAndTargetCard: some View {
-        HStack(spacing: 12) {
-            // Ripetizioni (sinistra)
-            HStack(spacing: 8) {
-                Image(systemName: "figure.strengthtraining.traditional")
-                    .font(.title2)
-                    .foregroundStyle(.blue)
-                
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("REPS")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    
-                    Text("\(sessionManager.repCount)")
-                        .font(.title)
-                        .fontWeight(.bold)
+        HStack(spacing: 20) {
+            // REPS
+            VStack(spacing: 8) {
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Image(systemName: "figure.strengthtraining.traditional")
+                        .font(.title3)
                         .foregroundStyle(.blue)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(12)
-            .background(Color.blue.opacity(0.1))
-            .cornerRadius(10)
-            
-            // Target (destra)
-            HStack(spacing: 8) {
-                Image(systemName: "target")
-                    .font(.title2)
-                    .foregroundStyle(targetZone.color)
-                
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("TARGET")
-                        .font(.caption2)
+                    Text("REPS")
+                        .font(.caption)
+                        .fontWeight(.semibold)
                         .foregroundStyle(.secondary)
-                    
-                    Text(targetZone.rawValue)
-                        .font(.subheadline)
-                        .fontWeight(.bold)
                 }
+                
+                // ✅ MOSTRA PROGRESSO
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text("\(sessionManager.repCount)")
+                        .font(.system(size: 48, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                    
+                    Text("/ \(targetReps)")
+                        .font(.title2)
+                        .foregroundStyle(.secondary)
+                }
+                
+                // Progress bar
+                GeometryReader { geometry in
+                    ZStack(alignment: .leading) {
+                        Rectangle()
+                            .fill(Color.white.opacity(0.1))
+                            .frame(height: 4)
+                            .cornerRadius(2)
+                        
+                        Rectangle()
+                            .fill(progressColor)
+                            .frame(width: geometry.size.width * progress, height: 4)
+                            .cornerRadius(2)
+                            .animation(.easeInOut, value: sessionManager.repCount)
+                    }
+                }
+                .frame(height: 4)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(12)
-            .background(Color(.systemGray6))
-            .cornerRadius(10)
+            .frame(maxWidth: .infinity)
+            .padding()
+            .background(Color.white.opacity(0.05))
+            .cornerRadius(16)
+            
+            // TARGET ZONE
+            VStack(spacing: 8) {
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Image(systemName: "target")
+                        .font(.title3)
+                        .foregroundStyle(sessionManager.targetZone.color)
+                    Text("TARGET")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.secondary)
+                }
+                
+                Text(sessionManager.targetZone.rawValue)
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity)
+            .padding()
+            .background(Color.white.opacity(0.05))
+            .cornerRadius(16)
         }
     }
     
@@ -426,7 +478,7 @@ struct TrainingSessionView: View {
     // MARK: - Data Stream
     
     private func startDataStream() {
-        dataStreamTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
+        dataStreamTimer = Timer.scheduledTimer(withTimeInterval: 0.02, repeats: true) { _ in
             sessionManager.processSensorData(
                 acceleration: bleManager.acceleration,
                 angularVelocity: bleManager.angularVelocity,
@@ -434,10 +486,34 @@ struct TrainingSessionView: View {
                 isCalibrated: bleManager.isCalibrated
             )
             
+            // Check velocity loss
             if settings.stopOnVelocityLoss &&
                sessionManager.isRecording &&
                sessionManager.velocityLoss >= settings.velocityLossThreshold {
                 sessionManager.stopRecording()
+            }
+            
+            // Auto-stop al raggiungimento target
+            /*
+            if sessionManager.isRecording &&
+               sessionManager.repCount >= self.targetReps {
+                sessionManager.stopRecording()
+                
+                // Vibrazione + feedback
+                let generator = UINotificationFeedbackGenerator()
+                generator.notificationOccurred(.success)
+            }
+             */
+            // Notifica visiva al raggiungimento target
+            if sessionManager.isRecording &&
+               sessionManager.repCount == self.targetReps {
+                
+                // Haptic feedback
+                let generator = UINotificationFeedbackGenerator()
+                generator.notificationOccurred(.success)
+                
+                // Voice feedback opzionale
+                voiceFeedback.announce("Target raggiunto")
             }
         }
     }
@@ -501,7 +577,8 @@ struct RepToastView: View {
     NavigationStack {
         TrainingSessionView(
             bleManager: BLEManager(),
-            targetZone: .strength
+            targetZone: .strength,
+            targetReps: 5
         )
     }
 }

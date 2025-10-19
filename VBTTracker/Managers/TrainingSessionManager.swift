@@ -40,7 +40,7 @@ class TrainingSessionManager: ObservableObject {
     private var isMoving = false
     private var phase: MovementPhase = .idle
     
-    private let repDetector = VBTRepDetector()
+    let repDetector = VBTRepDetector()
     private let voiceFeedback = VoiceFeedbackManager()
 
 
@@ -69,24 +69,34 @@ class TrainingSessionManager: ObservableObject {
         isRecording = true
         resetMetrics()
         
-        // Setup voice feedback callback SEMPLIFICATO
+        // ✅ NUOVO: Logga se pattern appreso è disponibile
+        if let pattern = repDetector.learnedPattern {
+            print("🎓 Pattern appreso caricato:")
+            print("   • ROM: \(String(format: "%.0f", pattern.estimatedROM * 100))cm")
+            print("   • Soglia min: \(String(format: "%.2f", pattern.dynamicMinAmplitude))g")
+            print("   • Velocità media: \(String(format: "%.2f", pattern.avgPeakVelocity)) m/s")
+        } else {
+            print("⚠️ Nessun pattern appreso - Usando soglie adaptive")
+        }
+        
+        // Setup voice feedback callback
         repDetector.onPhaseChange = { [weak self] phase in
             guard let self = self else { return }
             
             DispatchQueue.main.async {
                 switch phase {
-                case .eccentric:
-                    // Prima volta = "Stacco", altre = "Eccentrica"
+                case .descending:  // ✅ Aggiornato da .eccentric
                     if self.repCount == 0 && !self.repDetector.hasAnnouncedUnrack {
                         self.voiceFeedback.announceBarUnrack()
-                    } else {
-                        self.voiceFeedback.announceEccentric()
                     }
+                    /*else {
+                        self.voiceFeedback.announceEccentric()
+                    }*/
                     
-                case .concentric:
-                    self.voiceFeedback.announceConcentric()
-                    
-                case .idle, .returnToRack:
+                case .ascending:  // ✅ Aggiornato da .concentric
+                    //self.voiceFeedback.announceConcentric()
+                    break
+                case .idle, .completed:  // ✅ Aggiornato da .returnToRack
                     break
                 }
             }
@@ -170,18 +180,19 @@ class TrainingSessionManager: ObservableObject {
     private func handlePhaseChange(_ phase: VBTRepDetector.Phase) {
         DispatchQueue.main.async {
             switch phase {
-            case .eccentric:
-                // Primo movimento o eccentrica normale
+            case .descending:
                 if self.repCount == 0 && !self.repDetector.hasAnnouncedUnrack {
                     self.voiceFeedback.announceBarUnrack()
-                } else {
-                    self.voiceFeedback.announceEccentric()
                 }
+                /*else {
+                    self.voiceFeedback.announceEccentric()
+                }*/
                 
-            case .concentric:
-                self.voiceFeedback.announceConcentric()
+            case .ascending:
+                break;
+                //self.voiceFeedback.announceConcentric()
                 
-            case .idle, .returnToRack:
+            case .idle, .completed:
                 break
             }
         }
