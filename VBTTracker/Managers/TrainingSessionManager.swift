@@ -157,7 +157,7 @@ class TrainingSessionManager: ObservableObject {
 
         // Limita eventuale drift dovuto a rumore o saturazione
         integratedVelocity = max(-maxReasonableVelocity, min(maxReasonableVelocity, integratedVelocity))
-        let velocityMagnitude = abs(integratedVelocity)
+        let velocityMagnitude = max(0.0, abs(integratedVelocity))
 
         // 5. Se rilevata rep, aggiorna contatori
         if result.repDetected, let peakVel = result.peakVelocity {
@@ -169,13 +169,8 @@ class TrainingSessionManager: ObservableObject {
         // 6. AGGIORNA ZONA CORRENTE (basata su velocità corrente o picco)
         DispatchQueue.main.async {
             // Usa currentVelocity se disponibile, altrimenti peakVelocity
-            let velocityForZone: Double
-
-            if currentVelocityMagnitude > 0.1 {
-                velocityForZone = currentVelocityMagnitude
-            } else {
-                velocityForZone = self.peakVelocity
-            }
+            let repPeakVelocity = result.peakVelocity ?? self.lastRepPeakVelocity
+            let velocityForZone = max(currentVelocityMagnitude, repPeakVelocity)
 
             if velocityForZone > 0.1 {
                 self.currentZone = SettingsManager.shared.getTrainingZone(for: velocityForZone)
@@ -185,8 +180,12 @@ class TrainingSessionManager: ObservableObject {
             self.currentVelocity = currentVelocityMagnitude
 
             // Aggiorna peakVelocity durante la rep
-            if let peakVel = result.peakVelocity, peakVel > self.peakVelocity {
-                self.peakVelocity = peakVel
+            if let peakVel = result.peakVelocity {
+                self.lastRepPeakVelocity = peakVel
+
+                if peakVel > self.peakVelocity {
+                    self.peakVelocity = peakVel
+                }
             }
         }
     }
@@ -318,16 +317,18 @@ class TrainingSessionManager: ObservableObject {
         meanVelocity = 0.0
         velocityLoss = 0.0
         repCount = 0
-        
+
         isMoving = false
         phase = .idle
         inConcentricPhase = false
         concentricPeakReached = false
         lastRepTime = nil
         movementStartTime = nil
-        
+
         repPeakVelocities.removeAll()
         firstRepPeakVelocity = nil
+        lastRepPeakVelocity = 0.0
+        lastRepInTarget = true
         currentZone = .tooSlow
 
         repDetector.reset()
