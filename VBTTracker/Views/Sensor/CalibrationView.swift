@@ -225,26 +225,6 @@ struct CalibrationView: View {
 
 // MARK: - Supporting Views
 
-struct InstructionRow: View {
-    let number: String
-    let text: String
-    
-    var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Text(number)
-                .font(.headline)
-                .foregroundStyle(.white)
-                .frame(width: 28, height: 28)
-                .background(Circle().fill(Color.blue))
-            
-            Text(text)
-                .font(.subheadline)
-                .foregroundStyle(.primary)
-            
-            Spacer()
-        }
-    }
-}
 
 struct DataPreview: View {
     let label: String
