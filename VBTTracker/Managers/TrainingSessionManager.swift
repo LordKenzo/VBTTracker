@@ -36,10 +36,10 @@ class TrainingSessionManager: ObservableObject {
     
     // MARK: - Private Properties
     
-    private var velocity: Double = 0.0
+    private var integratedVelocity: Double = 0.0
     private var isMoving = false
     private var phase: MovementPhase = .idle
-    
+
     let repDetector = VBTRepDetector()
     private let voiceFeedback = VoiceFeedbackManager()
 
@@ -54,7 +54,10 @@ class TrainingSessionManager: ObservableObject {
     var firstRepPeakVelocity: Double?
     
     // Constants
-    private let dt: Double = 0.02 // 20ms sampling
+    private let defaultSampleInterval: Double = 0.02 // 20ms sampling
+    private let maxReasonableVelocity: Double = 5.0 // m/s guardrail
+
+    private var lastSampleTime: Date?
     // private let movementThreshold: Double = 2.5 // m/s²
     
     enum MovementPhase {
@@ -68,7 +71,9 @@ class TrainingSessionManager: ObservableObject {
     func startRecording() {
         isRecording = true
         resetMetrics()
-        
+
+        lastSampleTime = nil
+
         // ✅ NUOVO: Logga se pattern appreso è disponibile
         if let pattern = repDetector.learnedPattern {
             print("🎓 Pattern appreso caricato:")
@@ -116,8 +121,9 @@ class TrainingSessionManager: ObservableObject {
         print("⏹️ Sessione terminata - Reps: \(repCount), Mean: \(String(format: "%.3f", meanVelocity)) m/s")
 
         // Reset integratore per evitare drift tra sessioni
-        velocity = 0.0
+        integratedVelocity = 0.0
         currentVelocity = 0.0
+        lastSampleTime = nil
     }
 
     
@@ -139,32 +145,62 @@ class TrainingSessionManager: ObservableObject {
             accelNoGravity = accelZ - 1.0
         }
 
-        // Convert to m/s² and integrate with fixed dt (20 ms sampling)
-        let linearAcceleration = accelNoGravity * 9.81
-        velocity += linearAcceleration * dt
-        let velocityMagnitude = abs(velocity)
-        
         // 2. Passa modalità velocità al detector
         repDetector.velocityMode = SettingsManager.shared.velocityMeasurementMode
-        
+
         // 3. Rileva rep
+        let timestamp = Date()
         let result = repDetector.addSample(
             accZ: accelNoGravity,
-            timestamp: Date()
+            timestamp: timestamp
         )
-        
-        // 4. Se rilevata rep, aggiorna contatori
+
+        // 4. Integra accelerazione filtrata per ottenere la velocità in m/s
+        let filteredAcceleration = result.currentValue
+
+        let deltaTime: Double
+        if let lastTime = lastSampleTime {
+            let measuredDt = timestamp.timeIntervalSince(lastTime)
+            deltaTime = min(max(measuredDt, 0.005), 0.05)
+        } else {
+            deltaTime = defaultSampleInterval
+        }
+        lastSampleTime = timestamp
+
+        var linearAcceleration = filteredAcceleration * 9.81
+
+        // Piccolo filtro anti-rumore: ignora accelerazioni molto piccole
+        if abs(linearAcceleration) < 0.15 {
+            linearAcceleration = 0.0
+        }
+
+        integratedVelocity += linearAcceleration * deltaTime
+
+        // Smorza lentamente per ridurre drift quando il sensore è fermo
+        if abs(linearAcceleration) < 0.2 {
+            integratedVelocity *= 0.98
+            if abs(integratedVelocity) < 0.02 {
+                integratedVelocity = 0.0
+            }
+        }
+
+        integratedVelocity = max(-maxReasonableVelocity, min(maxReasonableVelocity, integratedVelocity))
+        let velocityMagnitude = abs(integratedVelocity)
+
+        // 5. Se rilevata rep, aggiorna contatori
         if result.repDetected, let peakVel = result.peakVelocity {
             countRep(peakVelocity: peakVel)
         }
-        
-        // 5. AGGIORNA ZONA CORRENTE (basata su velocità corrente o picco)
+
+        let currentVelocityMagnitude = velocityMagnitude
+
+        // 6. AGGIORNA ZONA CORRENTE (basata su velocità corrente o picco)
         DispatchQueue.main.async {
             // Usa currentVelocity se disponibile, altrimenti peakVelocity
             let velocityForZone: Double
 
-            if velocityMagnitude > 0.1 {
-                velocityForZone = velocityMagnitude
+            if currentVelocityMagnitude > 0.1 {
+                velocityForZone = currentVelocityMagnitude
             } else {
                 velocityForZone = self.peakVelocity
             }
@@ -174,8 +210,8 @@ class TrainingSessionManager: ObservableObject {
             }
 
             // Aggiorna velocità corrente con l'integrata (m/s)
-            self.currentVelocity = velocityMagnitude
-            
+            self.currentVelocity = currentVelocityMagnitude
+
             // Aggiorna peakVelocity durante la rep
             if let peakVel = result.peakVelocity, peakVel > self.peakVelocity {
                 self.peakVelocity = peakVel
@@ -233,7 +269,9 @@ class TrainingSessionManager: ObservableObject {
             self.voiceFeedback.announceRep(number: self.repCount, isInTarget: isInTarget)
 
             if let referenceVelocity = self.repDetector.learnedPattern?.avgPeakVelocity {
-                print("🔍 Debug: Mean velocity rep #\(self.repCount): \(String(format: "%.3f", self.meanVelocity)) m/s (ref ≈ \(String(format: "%.3f", referenceVelocity)) m/s)")
+                let meanString = String(format: "%.3f", self.meanVelocity)
+                let referenceString = String(format: "%.3f", referenceVelocity)
+                print("🔍 Debug: Mean velocity rep #\(self.repCount): \(meanString) m/s (ref ≈ \(referenceString) m/s)")
             }
 
             // Check velocity loss
@@ -302,7 +340,7 @@ class TrainingSessionManager: ObservableObject {
     }
     
     private func resetMetrics() {
-        velocity = 0.0
+        integratedVelocity = 0.0
         currentVelocity = 0.0
         peakVelocity = 0.0
         meanVelocity = 0.0
@@ -319,7 +357,8 @@ class TrainingSessionManager: ObservableObject {
         repPeakVelocities.removeAll()
         firstRepPeakVelocity = nil
         currentZone = .tooSlow
-        
+
         repDetector.reset()
+        lastSampleTime = nil
     }
 }
