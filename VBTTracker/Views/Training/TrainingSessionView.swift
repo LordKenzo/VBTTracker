@@ -20,6 +20,9 @@ struct TrainingSessionView: View {
     @State private var dataStreamTimer: Timer?
     @State private var showEndSessionAlert = false
     
+    @State private var showSummary = false
+    @State private var sessionData: TrainingSessionData?
+    
     var body: some View {
         ZStack {
             // Background gradient
@@ -116,11 +119,18 @@ struct TrainingSessionView: View {
         .alert("Terminare Sessione?", isPresented: $showEndSessionAlert) {
             Button("Annulla", role: .cancel) { }
             Button("Termina", role: .destructive) {
+                // Crea session data PRIMA di stoppare
+                sessionData = sessionManager.createSessionData()
                 sessionManager.stopRecording()
-                dismiss()
+                showSummary = true
             }
         } message: {
-            Text("Ripetizioni completate: \(sessionManager.repCount)/\(targetReps)")  // ✅ Mostra progresso
+            Text("Ripetizioni completate: \(sessionManager.repCount)/\(targetReps)")
+        }
+        .sheet(isPresented: $showSummary) {
+            if let data = sessionData {
+                TrainingSummaryView(sessionData: data)
+            }
         }
     }
     
