@@ -216,10 +216,8 @@ class VBTRepDetector {
                     let amplitude = peak.value - valley.value
                     let timeSinceLast = lastRepTime?.timeIntervalSinceNow ?? -1.0
                     let validTiming = abs(timeSinceLast) > minTimeBetween || lastRepTime == nil
-                    let validAmplitude = amplitude >= minAmplitude * 1.2  // 20% più restrittivo
-
-                    
-                    // 🧠 FILTRO INTELLIGENTE: Ignora micro-movimenti dopo inattività
+                                        
+                    // FILTRO INTELLIGENTE: Ignora micro-movimenti dopo inattività
                     let timeSinceMovement = lastMovementTime?.timeIntervalSinceNow ?? 0
                     let isAfterLongPause = abs(timeSinceMovement) > 2.0
                     
