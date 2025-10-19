@@ -513,7 +513,7 @@ struct TrainingSessionView: View {
                 generator.notificationOccurred(.success)
                 
                 // Voice feedback opzionale
-                voiceFeedback.announce("Target raggiunto")
+                // voiceFeedback.announce("Target raggiunto")
             }
         }
     }
