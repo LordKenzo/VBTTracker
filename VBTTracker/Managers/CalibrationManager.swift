@@ -71,8 +71,8 @@ class CalibrationManager: ObservableObject {
         let avgAngularVelocity = calculateAverage(samples.map { $0.angularVelocity })
         let avgAngles = calculateAverage(samples.map { $0.angles })
         
-        // Crea calibrazione
-        let calibration = CalibrationData(
+        // ⭐ USA FACTORY METHOD con auto-detect asse verticale
+        let calibration = CalibrationData.create(
             timestamp: Date(),
             accelerationOffset: avgAcceleration,
             angularVelocityOffset: avgAngularVelocity,

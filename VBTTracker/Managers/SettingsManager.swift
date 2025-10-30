@@ -384,4 +384,5 @@ enum TrainingZone: String, CaseIterable {
         case .maxSpeed: return ">1.00 m/s - Velocità massima"
         }
     }
+    
 }

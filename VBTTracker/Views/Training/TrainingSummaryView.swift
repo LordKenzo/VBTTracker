@@ -118,6 +118,14 @@ struct TrainingSummaryView: View {
             
             // Progress bar
             GeometryReader { geometry in
+                // ✅ Calcola valori normalizzati e validali
+                let normalizedVL = sessionData.velocityLoss / 100.0
+                let normalizedThreshold = sessionData.velocityLossThreshold / 100.0
+                
+                // ✅ Assicura valori finiti e nel range [0, 1]
+                let safeVL = normalizedVL.isFinite ? min(max(normalizedVL, 0), 1.0) : 0
+                let safeThreshold = normalizedThreshold.isFinite ? min(max(normalizedThreshold, 0), 1.0) : 0
+                
                 ZStack(alignment: .leading) {
                     // Background
                     RoundedRectangle(cornerRadius: 8)
@@ -126,13 +134,15 @@ struct TrainingSummaryView: View {
                     // Progress
                     RoundedRectangle(cornerRadius: 8)
                         .fill(velocityLossColor)
-                        .frame(width: geometry.size.width * min(sessionData.velocityLoss / 100, 1.0))
+                        .frame(width: geometry.size.width * safeVL)
                     
-                    // Threshold marker
-                    Rectangle()
-                        .fill(Color.white.opacity(0.5))
-                        .frame(width: 2)
-                        .offset(x: geometry.size.width * (sessionData.velocityLossThreshold / 100))
+                    // Threshold marker (solo se valido)
+                    if safeThreshold > 0 && safeThreshold <= 1.0 {
+                        Rectangle()
+                            .fill(Color.white.opacity(0.5))
+                            .frame(width: 2)
+                            .offset(x: geometry.size.width * safeThreshold)
+                    }
                 }
             }
             .frame(height: 12)
@@ -529,7 +539,7 @@ struct TrainingSessionData {
         
         let firstPeakVelocity = peakVelocities.first!
         
-        for (_index, peakVel) in peakVelocities.enumerated() {
+        for (_, peakVel) in peakVelocities.enumerated() {
             // Calculate velocity loss from first rep
             let vlFromFirst = ((firstPeakVelocity - peakVel) / firstPeakVelocity) * 100
             

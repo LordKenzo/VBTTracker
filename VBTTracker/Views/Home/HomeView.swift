@@ -2,15 +2,7 @@
 //  HomeView.swift
 //  VBTTracker
 //
-//  Created by Lorenzo Franceschini on 17/10/25.
-//
-
-
-//
-//  HomeView.swift
-//  VBTTracker
-//
-//  Schermata principale dell'app
+//  MODIFICHE: Aggiunto link Test Multi-Axis nella sezione Quick Actions
 //
 
 import SwiftUI
@@ -191,6 +183,31 @@ struct HomeView: View {
             }
             .disabled(!bleManager.isConnected || !bleManager.isCalibrated)
             
+            // ⭐ NUOVO: Test Multi-Axis Detection (DEBUG)
+            NavigationLink(destination: TestMultiAxisView(bleManager: bleManager)) {
+                HStack {
+                    Image(systemName: "ant.circle.fill")
+                        .font(.title2)
+                    
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Test Multi-Axis Detection")
+                            .font(.headline)
+                        Text("Debug: Z-only vs Multi-Axis+Gyro")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    
+                    Spacer()
+                    
+                    Image(systemName: "chevron.right")
+                        .foregroundStyle(.secondary)
+                }
+                .padding()
+                .background(Color.purple.opacity(0.15))
+                .foregroundStyle(.purple)
+                .cornerRadius(12)
+            }
+            .disabled(!bleManager.isConnected)
         }
     }
     
