@@ -187,12 +187,18 @@ class BLEManager: NSObject, ObservableObject, SensorDataProvider {
             finalAcceleration = calibrated.acceleration
             finalAngularVelocity = calibrated.angularVelocity
             finalAngles = calibrated.angles
+            
         }
         
         DispatchQueue.main.async {
             self.acceleration = finalAcceleration
             self.angularVelocity = finalAngularVelocity
             self.angles = finalAngles
+        }
+        if self.isCalibrated && Int.random(in: 0...49) == 0 {
+            print("📊 CALIBRATO: X=\(String(format: "%.3f", finalAcceleration[0]))g, " +
+                  "Y=\(String(format: "%.3f", finalAcceleration[1]))g, " +
+                  "Z=\(String(format: "%.3f", finalAcceleration[2]))g")
         }
     }
 }
