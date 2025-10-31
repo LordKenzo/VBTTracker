@@ -2,463 +2,242 @@
 //  ROMCalibrationManager.swift
 //  VBTTracker
 //
-//  Calibrazione ROM - DUAL MODE (Automatic + Manual)
+//  Versione semplificata: SOLO calibrazione automatica
 //
 
 import Foundation
 import Combine
 
-class ROMCalibrationManager: ObservableObject {
-    
-    // MARK: - Mode Selection
-    
-    @Published var calibrationMode: CalibrationMode = .automatic
-    
-    // MARK: - Automatic Mode State
-    
+final class ROMCalibrationManager: ObservableObject {
+
+    // MARK: - Stato pubblico (usato dalle View)
+
     @Published var automaticState: AutomaticCalibrationState = .idle
-    private var automaticCalibrationReps: [AutomaticCalibrationRep] = []
-    private let requiredAutomaticReps: Int = 2
-    
-    // MARK: - Manual Mode State
-    
-    @Published var manualState: ManualCalibrationState = .idle
-    @Published var currentManualStep: ManualCalibrationStep = .step1_unrackAndLockout
-    @Published var isRecordingStep: Bool = false
-    @Published var manualStepData: [ManualCalibrationStep: StepRecording] = [:]
-    
-    private var recordingStartTime: Date?
-    private var recordingSamples: [AccelerationSample] = []
-    
-    // MARK: - Common State
-    
-    @Published var calibrationProgress: Double = 0.0
     @Published var statusMessage: String = "Pronto per calibrazione"
-    @Published var learnedPattern: LearnedPattern?
+    @Published var calibrationProgress: Double = 0.0          // [0, 1]
     @Published var isCalibrated: Bool = false
-    
-    // MARK: - Internal Components
-    
+    @Published var learnedPattern: LearnedPattern?
+
+    // MARK: - Tipi interni
+
+    /// Finestra minima che racchiude una ripetizione rilevata
+    private struct RepWindow {
+        let start: Date
+        let end: Date
+        let min: Double
+        let max: Double
+    }
+
+    // MARK: - Buffer e parametri
+
+    /// Campioni Z (in g) usati durante la calibrazione automatica
     private var samples: [AccelerationSample] = []
-    private var detector: VBTRepDetector
-    private var lastSignificantMovement: Date?
-    private var restStartTime: Date?
-    private let restDetectionTime: TimeInterval = 3.0
+
+    /// Parametri minimi per validare la rep (coerenti con Settings)
+    private var minAmplitudeG: Double { SettingsManager.shared.repMinAmplitude }
+    private var smoothingWin: Int { max(3, SettingsManager.shared.repSmoothingWindow) }
+    private let minConcentricDuration: TimeInterval = 0.30
     
-    // MARK: - Initialization
-    
-    init() {
-        self.detector = VBTRepDetector()
-        self.detector.velocityMode = .concentricOnly
-        loadPattern()
+    // Frequenza di campionamento del flusso durante la calibrazione (Hz)
+    var sampleRateHz: Double = 200   // puoi aggiornarla da fuori (es. dal BLEManager)
+
+    // Durata del look-ahead in secondi (quanto "oltre" il picco guardiamo)
+    var lookAheadSeconds: Double = 0.1  // 0.1s di default
+
+    private var lookAheadSamples: Int {
+        // converti ms in secondi
+        let seconds = SettingsManager.shared.repLookAheadMs / 1000.0
+        let n = Int(round(seconds * sampleRateHz))
+        return min(max(n, 10), 80)
     }
-    
-    // MARK: - Public Methods - Mode Selection
-    
-    func selectMode(_ mode: CalibrationMode) {
-        reset()
-        calibrationMode = mode
-        statusMessage = mode == .automatic ?
-            "Pronto per calibrazione automatica" :
-            "Pronto per calibrazione manuale"
-    }
-    
-    // MARK: - Automatic Mode Methods
-    
+
+    // MARK: - API compatibili (la manuale Ã¨ stata rimossa)
+
+    /// Manteniamo la firma per compatibilitÃ  con le view; ora non fa nulla
+    func selectMode(_ mode: CalibrationMode) { /* solo .automatic, no-op */ }
+
     func startAutomaticCalibration() {
-        reset()
-        calibrationMode = .automatic
+        resetEphemeral()
+        isCalibrated = false
+        learnedPattern = nil
         automaticState = .waitingForFirstRep
-        statusMessage = "Esegui 2 ripetizioni lente e controllate"
-        print("🎯 Calibrazione AUTOMATICA iniziata")
+        statusMessage = "Esegui 2 ripetizioni ROM completo"
+        calibrationProgress = 0.0
     }
-    
-    func processAutomaticSample(accZ: Double, timestamp: Date) {
-        guard automaticState == .waitingForFirstRep ||
-              automaticState == .detectingReps ||
-              automaticState == .waitingForLoad else {
-            return
+
+    func cancelCalibration() {
+        resetEphemeral()
+        automaticState = .idle
+        statusMessage = "Calibrazione annullata"
+        calibrationProgress = 0.0
+    }
+
+    func reset() {
+        cancelCalibration()
+        learnedPattern = nil
+        isCalibrated = false
+        statusMessage = "Pattern cancellato"
+    }
+
+    func deletePattern() {
+        reset()
+        UserDefaults.standard.removeObject(forKey: "learnedPattern")
+    }
+
+    func savePattern() {
+        guard let pattern = learnedPattern,
+              let data = try? JSONEncoder().encode(pattern) else { return }
+        UserDefaults.standard.set(data, forKey: "learnedPattern")
+    }
+
+    /// Opzionale: consenti di saltare la calibrazione usando un pattern di default
+    func skipCalibration() {
+        learnedPattern = .defaultPattern
+        isCalibrated = true
+        automaticState = .completed
+        statusMessage = "Usato pattern di default"
+        calibrationProgress = 1.0
+    }
+
+    /// Facoltativo: chiamalo quando vuoi segnare la fine del flusso â€œwaitingForLoadâ€
+    func finishCalibration() {
+        guard isCalibrated else { return }
+        automaticState = .completed
+        statusMessage = "Calibrazione completata!"
+    }
+
+    // MARK: - Ingresso dati (chiamato dal flusso BLE)
+
+    /// Passa i campioni Z (asse verticale) dal sensore durante la calibrazione
+    func ingestSample(accZ: Double, timestamp: Date) {
+        switch automaticState {
+        case .waitingForFirstRep, .detectingReps:
+            samples.append(AccelerationSample(timestamp: timestamp, accZ: accZ))
+            // Mantieni ~4 secondi a 200 Hz (800 campioni)
+            if samples.count > 800 { samples.removeFirst(samples.count - 800) }
+
+            automaticState = .detectingReps
+            statusMessage = "Riconoscimento ripetizioniâ€¦"
+            detectRepsIfPossible()
+
+        default:
+            break
         }
-        
-        let sample = AccelerationSample(timestamp: timestamp, accZ: accZ)
-        samples.append(sample)
-        
-        if samples.count > 500 {
-            samples.removeFirst()
-        }
-        
-        // 1️⃣ Rileva movimento significativo
-        if abs(accZ) > 0.15 {
-            lastSignificantMovement = timestamp
-            restStartTime = nil
-            
-            if automaticState == .waitingForFirstRep {
-                automaticState = .detectingReps
-                statusMessage = "Rep 1/\(requiredAutomaticReps)..."
+    }
+
+    // MARK: - Logica di detection (compatta)
+
+    private func detectRepsIfPossible() {
+        guard samples.count >= smoothingWin + 2 else { return }
+
+        let z = samples.map { $0.accZ }
+        let smoothed = movingAverage(values: z, win: smoothingWin)
+
+        var repWindows: [RepWindow] = []
+        var lastValley: (idx: Int, val: Double)?
+        // var lastPeak: (idx: Int, val: Double)?
+
+        var i = 1
+        while i < smoothed.count - 1 {
+            let prev = smoothed[i - 1], cur = smoothed[i], next = smoothed[i + 1]
+
+            // Valle
+            if cur < prev && cur < next {
+                lastValley = (i, cur)
             }
-        }
-        
-        // 2️⃣ Durante rilevamento rep
-        if automaticState == .detectingReps {
-            let result = detector.addSample(accZ: accZ, timestamp: timestamp)
-            
-            if result.repDetected, let peakVel = result.peakVelocity {
-                recordAutomaticRep(
-                    samples: detector.getSamples(),
-                    peakVelocity: peakVel,
-                    timestamp: timestamp
-                )
-                
-                calibrationProgress = Double(automaticCalibrationReps.count) / Double(requiredAutomaticReps)
-                
-                if automaticCalibrationReps.count < requiredAutomaticReps {
-                    statusMessage = "Rep \(automaticCalibrationReps.count)/\(requiredAutomaticReps) completata. Fai la prossima..."
-                } else {
-                    analyzeAutomaticData()
-                }
-            }
-        }
-        
-        // 3️⃣ Rileva periodo di rest dopo analisi
-        if automaticState == .waitingForLoad {
-            if abs(accZ) < 0.08 {
-                if restStartTime == nil {
-                    restStartTime = timestamp
-                }
-                
-                if let restStart = restStartTime {
-                    let restDuration = timestamp.timeIntervalSince(restStart)
-                    if restDuration >= restDetectionTime {
-                        automaticState = .completed
-                        statusMessage = "✅ Calibrazione completata! Inizia serie"
-                        print("✅ Calibrazione AUTOMATICA completata")
+
+            // Picco
+            if cur > prev && cur > next {
+                if let v = lastValley {
+                    let peak = (i, cur)
+                    let endIdx = min(i + lookAheadSamples, smoothed.count - 1)
+
+
+                    let amp = (peak.1 - v.val) // picco - valle
+                    if amp >= minAmplitudeG {
+                        let startT = samples[v.idx].timestamp
+                        let endT   = samples[endIdx].timestamp
+                        let dur    = endT.timeIntervalSince(startT)
+
+                        if dur >= minConcentricDuration {
+                            repWindows.append(.init(
+                                start: startT, end: endT,
+                                min: v.val, max: peak.1
+                            ))
+                        }
                     }
                 }
-            } else {
-                restStartTime = nil
             }
+            i += 1
         }
-    }
-    
-    private func recordAutomaticRep(samples: [AccelerationSample],
-                                    peakVelocity: Double,
-                                    timestamp: Date) {
-        let values = samples.map { $0.accZ }
-        
-        guard let maxVal = values.max(),
-              let minVal = values.min() else {
-            return
-        }
-        
-        let amplitude = maxVal - minVal
-        let concentricSamples = samples.filter { $0.accZ > 0 }
-        let eccentricSamples = samples.filter { $0.accZ < 0 }
-        
-        let concentricDuration = Double(concentricSamples.count) * 0.02
-        let eccentricDuration = Double(eccentricSamples.count) * 0.02
-        
-        let rep = AutomaticCalibrationRep(
-            amplitude: amplitude,
-            concentricDuration: concentricDuration,
-            eccentricDuration: eccentricDuration,
-            peakVelocity: peakVelocity,
-            samples: samples
-        )
-        
-        automaticCalibrationReps.append(rep)
-        
-        print("📊 Rep AUTO \(automaticCalibrationReps.count) - " +
-              "Amp: \(String(format: "%.2f", amplitude))g, " +
-              "Vel: \(String(format: "%.2f", peakVelocity)) m/s")
-    }
-    
-    private func analyzeAutomaticData() {
-        guard automaticCalibrationReps.count >= requiredAutomaticReps else {
-            automaticState = .failed("Dati insufficienti")
-            return
-        }
-        
-        automaticState = .analyzing
-        statusMessage = "Analisi pattern..."
-        
-        let avgAmp = automaticCalibrationReps.map { $0.amplitude }.reduce(0, +) / Double(automaticCalibrationReps.count)
-        let avgConcentric = automaticCalibrationReps.map { $0.concentricDuration }.reduce(0, +) / Double(automaticCalibrationReps.count)
-        let avgEccentric = automaticCalibrationReps.map { $0.eccentricDuration }.reduce(0, +) / Double(automaticCalibrationReps.count)
-        let avgVel = automaticCalibrationReps.map { $0.peakVelocity }.reduce(0, +) / Double(automaticCalibrationReps.count)
-        
-        let estimatedROM = estimateROM(amplitude: avgAmp, velocity: avgVel, duration: avgConcentric)
-        
-        learnedPattern = LearnedPattern.fromAutomaticCalibration(
-            amplitude: avgAmp,
-            concentricDuration: avgConcentric,
-            eccentricDuration: avgEccentric,
-            peakVelocity: avgVel,
-            rom: estimatedROM
-        )
-        
-        isCalibrated = true
-        automaticState = .waitingForLoad
-        statusMessage = "✅ Pattern appreso! Carica bilanciere e aspetta 3s"
-        
-        savePattern()
-        
-        print("🎓 Pattern AUTOMATICO appreso:")
-        print("   • Ampiezza: \(String(format: "%.2f", avgAmp))g")
-        print("   • Durata concentrica: \(String(format: "%.2f", avgConcentric))s")
-        print("   • Velocità media: \(String(format: "%.2f", avgVel)) m/s")
-        print("   • ROM stimato: \(String(format: "%.0f", estimatedROM * 100))cm")
-    }
-    
-    // MARK: - Manual Mode Methods
-    
-    func startManualCalibration() {
-        reset()
-        calibrationMode = .manual
-        currentManualStep = .step1_unrackAndLockout
-        manualState = .instructionsShown(.step1_unrackAndLockout)
-        statusMessage = "Step 1/5: Leggi le istruzioni"
-        calibrationProgress = 0.0
-        print("🎯 Calibrazione MANUALE iniziata")
-    }
-    
-    func startRecordingStep() {
-        guard case .instructionsShown(let step) = manualState else {
-            print("⚠️ Non è possibile registrare: stato non corretto")
-            return
-        }
-        
-        isRecordingStep = true
-        recordingStartTime = Date()
-        recordingSamples.removeAll()
-        manualState = .recording(step)
-        statusMessage = "🔴 REGISTRAZIONE in corso..."
-        
-        print("🔴 Inizio registrazione step: \(step.title)")
-    }
-    
-    func processManualSample(accZ: Double, timestamp: Date) {
-        guard isRecordingStep,
-              case .recording = manualState else {
-            return
-        }
-        
-        let sample = AccelerationSample(timestamp: timestamp, accZ: accZ)
-        recordingSamples.append(sample)
-    }
-    
-    func stopRecordingStep() {
-        guard isRecordingStep,
-              case .recording(let step) = manualState,
-              let startTime = recordingStartTime else {
-            print("⚠️ Nessuna registrazione in corso")
-            return
-        }
-        
-        isRecordingStep = false
-        let endTime = Date()
-        
-        // Crea StepRecording
-        let recording = StepRecording(
-            step: step,
-            samples: recordingSamples,
-            startTime: startTime,
-            endTime: endTime
-        )
-        
-        // Salva dati step
-        manualStepData[step] = recording
-        manualState = .stepCompleted(step)
-        
-        print("✅ Step completato: \(step.title)")
-        print("   • Durata: \(String(format: "%.2f", recording.duration))s")
-        print("   • Campioni: \(recording.sampleCount)")
-        print("   • Ampiezza: \(String(format: "%.2f", recording.amplitude))g")
-        
-        // Aggiorna progress
-        calibrationProgress = step.progressValue
-        
-        // Verifica se è l'ultimo step
-        if step.isLastStep {
-            analyzeManualData()
+
+        // Prendi al massimo le prime 2 rep valide in ordine temporale
+        let firstTwo = Array(repWindows.sorted { $0.start < $1.start }.prefix(2))
+
+        // Aggiorna progresso
+        calibrationProgress = min(Double(firstTwo.count) / 2.0, 1.0)
+
+        if firstTwo.count == 2 {
+            automaticState = .analyzing
+            statusMessage = "Analisi patternâ€¦"
+            computeLearnedPattern(from: firstTwo)
+        } else if firstTwo.count == 1 {
+            statusMessage = "1/2 ripetizioni rilevataâ€¦"
         } else {
-            statusMessage = "✅ Step completato! Pronto per il prossimo"
+            automaticState = .waitingForFirstRep
+            statusMessage = "Esegui 2 ripetizioni ROM completo"
         }
     }
-    
-    func nextManualStep() {
-        guard case .stepCompleted(let currentStep) = manualState,
-              let nextStep = currentStep.next() else {
-            print("⚠️ Nessuno step successivo disponibile")
-            return
-        }
-        
-        currentManualStep = nextStep
-        manualState = .instructionsShown(nextStep)
-        statusMessage = "Step \(nextStep.rawValue + 1)/5: Leggi le istruzioni"
-        
-        print("➡️ Avanzamento a step: \(nextStep.title)")
-    }
-    
-    private func analyzeManualData() {
-        guard manualStepData.count == 5 else {
-            manualState = .failed("Dati incompleti: \(manualStepData.count)/5 step")
-            return
-        }
-        
-        manualState = .analyzing
-        statusMessage = "Analisi dati..."
-        
-        // Estrai dati per fase
-        guard let step1 = manualStepData[.step1_unrackAndLockout],
-              let step2 = manualStepData[.step2_eccentricDown],
-              let step3 = manualStepData[.step3_concentricUp],
-              let step4 = manualStepData[.step4_eccentricDown2],
-              let step5 = manualStepData[.step5_concentricUp2] else {
-            manualState = .failed("Dati step mancanti")
-            return
-        }
-        
-        let eccentricData = [step2, step4]
-        let concentricData = [step3, step5]
-        
-        // Crea pattern usando factory method
-        learnedPattern = LearnedPattern.fromManualCalibration(
-            unrackData: step1,
-            eccentricData: eccentricData,
-            concentricData: concentricData
+
+    private func computeLearnedPattern(from reps: [RepWindow]) {
+        guard reps.count == 2 else { return }
+
+        let amps = reps.map { $0.max - $0.min }
+        let durs = reps.map { $0.end.timeIntervalSince($0.start) }
+
+        let avgAmp = max(0.0, amps.reduce(0, +) / Double(amps.count))
+        let avgConcentric = max(minConcentricDuration, durs.reduce(0, +) / Double(durs.count))
+
+        // Stime robuste e conservative per i campi richiesti
+        let estROM = max(0.15, avgAmp * 0.5)             // m, dipende dal setup
+        let estPeakV = max(0.1, estROM / max(0.3, avgConcentric))
+
+        let pattern = LearnedPattern(
+            rom: estROM,                         // ROM stimata (m)
+            minThreshold: avgAmp * 0.5,          // soglia dinamica basata su ampiezza
+            avgVelocity: estPeakV,               // velocitÃ  media (m/s)
+            avgConcentricDuration: avgConcentric,
+            restThreshold: avgAmp * 0.1          // soglia "fermo"
         )
-        
+
+
+        learnedPattern = pattern
         isCalibrated = true
-        manualState = .completed
         calibrationProgress = 1.0
-        statusMessage = "✅ Calibrazione MANUALE completata!"
-        
-        savePattern()
-        
-        print("🎓 Pattern MANUALE appreso:")
-        if let pattern = learnedPattern {
-            print("   • Ampiezza: \(String(format: "%.2f", pattern.avgAmplitude))g")
-            print("   • Durata concentrica: \(String(format: "%.2f", pattern.avgConcentricDuration))s")
-            print("   • Durata eccentrica: \(String(format: "%.2f", pattern.avgEccentricDuration))s")
-            print("   • Velocità media: \(String(format: "%.2f", pattern.avgPeakVelocity)) m/s")
-            print("   • ROM stimato: \(String(format: "%.0f", pattern.estimatedROM * 100))cm")
-        }
+        automaticState = .waitingForLoad
+        statusMessage = "Carica il bilanciere: pronto!"
     }
-    
-    // MARK: - Common Methods
-    
-    func skipCalibration() {
-        learnedPattern = LearnedPattern.defaultPattern
-        isCalibrated = true
-        
-        if calibrationMode == .automatic {
-            automaticState = .completed
-        } else {
-            manualState = .completed
-        }
-        
-        statusMessage = "Pattern default caricato"
-        savePattern()
-        print("⚠️ Calibrazione saltata - Usando defaults")
-    }
-    
-    func savePattern() {
-        guard let pattern = learnedPattern else { return }
-        
-        if let encoded = try? JSONEncoder().encode(pattern) {
-            UserDefaults.standard.set(encoded, forKey: "learnedPattern")
-            print("💾 Pattern salvato (\(pattern.calibrationMode.displayName))")
-        }
-    }
-    
-    func loadPattern() {
-        if let data = UserDefaults.standard.data(forKey: "learnedPattern"),
-           let pattern = try? JSONDecoder().decode(LearnedPattern.self, from: data) {
-            learnedPattern = pattern
-            isCalibrated = true
-            
-            if calibrationMode == .automatic {
-                automaticState = .completed
-            } else {
-                manualState = .completed
-            }
-            
-            statusMessage = "Pattern caricato: \(pattern.shortDescription)"
-            print("📂 Pattern caricato: \(pattern.description)")
-        }
-    }
-    
-    func deletePattern() {
-        UserDefaults.standard.removeObject(forKey: "learnedPattern")
-        learnedPattern = nil
-        isCalibrated = false
-        reset()
-        print("🗑️ Pattern eliminato")
-    }
-    
-    func reset() {
-        // Reset automatic state
-        automaticState = .idle
-        automaticCalibrationReps.removeAll()
-        
-        // Reset manual state
-        manualState = .idle
-        currentManualStep = .step1_unrackAndLockout
-        isRecordingStep = false
-        manualStepData.removeAll()
-        recordingStartTime = nil
-        recordingSamples.removeAll()
-        
-        // Reset common state
-        calibrationProgress = 0.0
+
+    // MARK: - Helpers
+
+    private func resetEphemeral() {
         samples.removeAll()
-        detector.reset()
-        lastSignificantMovement = nil
-        restStartTime = nil
-        learnedPattern = nil
-        isCalibrated = false
-        
-        statusMessage = "Pronto per calibrazione"
     }
-    
-    // MARK: - Helper Methods
-    
-    private func estimateROM(amplitude: Double, velocity: Double, duration: Double) -> Double {
-        let romFromAmplitude = amplitude * 0.30
-        let estimated = min(max(romFromAmplitude, 0.20), 0.80)
-        return estimated
-    }
-    
-    // MARK: - Computed Properties
-    
-    var isInProgress: Bool {
-        switch calibrationMode {
-        case .automatic:
-            return automaticState != .idle && automaticState != .completed
-        case .manual:
-            return manualState != .idle && manualState != .completed
-        }
-    }
-    
-    var canStartRecording: Bool {
-        if case .instructionsShown = manualState {
-            return true
-        }
-        return false
-    }
-    
-    var currentStepProgress: String {
-        guard calibrationMode == .manual else { return "" }
-        return "\(currentManualStep.rawValue + 1)/5"
-    }
-}
 
-// MARK: - Private Data Models
-
-private struct AutomaticCalibrationRep {
-    let amplitude: Double
-    let concentricDuration: Double
-    let eccentricDuration: Double
-    let peakVelocity: Double
-    let samples: [AccelerationSample]
+    private func movingAverage(values: [Double], win: Int) -> [Double] {
+        guard win > 1, values.count >= win else { return values }
+        var res: [Double] = []
+        var sum = 0.0
+        for i in 0..<values.count {
+            sum += values[i]
+            if i >= win { sum -= values[i - win] }
+            if i >= win - 1 { res.append(sum / Double(win)) }
+        }
+        // riallinea con padding iniziale per mantenere la stessa lunghezza
+        let padCount = max(0, values.count - res.count)
+        if padCount > 0 {
+            return Array(repeating: res.first ?? 0.0, count: padCount) + res
+        }
+        return res
+    }
 }

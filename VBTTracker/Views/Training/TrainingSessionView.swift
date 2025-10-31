@@ -100,21 +100,24 @@ struct TrainingSessionView: View {
         )
         .onAppear {
             sessionManager.targetZone = targetZone
-            
+            let fallbackHz = 1.0 / 0.02 // 50 Hz
+            sessionManager.setSampleRateHz(bleManager.sampleRateHz ?? fallbackHz)
+
             // Carica pattern ROM
             if let data = UserDefaults.standard.data(forKey: "learnedPattern"),
                let pattern = try? JSONDecoder().decode(LearnedPattern.self, from: data) {
                 sessionManager.repDetector.learnedPattern = pattern
                 print("📂 Pattern ROM caricato: \(String(format: "%.0fcm", pattern.estimatedROM * 100))")
             }
-            
+
             startDataStream()
-            
-            // ✅ AGGIUNGI: Avvia automaticamente la sessione
             sessionManager.startRecording()
         }
         .onDisappear {
             stopDataStream()
+            if sessionManager.isRecording {
+                sessionManager.stopRecording()
+            }
         }
         .alert("Terminare Sessione?", isPresented: $showEndSessionAlert) {
             Button("Annulla", role: .cancel) { }
@@ -131,6 +134,9 @@ struct TrainingSessionView: View {
             if let data = sessionData {
                 TrainingSummaryView(sessionData: data)
             }
+        }
+        .onReceive(bleManager.$sampleRateHz.compactMap { $0 }) { hz in
+            sessionManager.setSampleRateHz(hz)
         }
     }
     

@@ -93,7 +93,9 @@ struct RepDetectionSettingsView: View {
             }
             
             // MARK: - Signal Processing
+            // MARK: - Signal Processing
             Section {
+                // 1️⃣ Stepper smoothing window
                 Stepper(
                     value: $settings.repSmoothingWindow,
                     in: 5...20,
@@ -107,17 +109,35 @@ struct RepDetectionSettingsView: View {
                             .monospacedDigit()
                     }
                 }
-                
+
                 Text(smoothingDescription)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.vertical, 4)
-                
+
+                Divider().padding(.vertical, 4)
+
+                // 2️⃣ 🔹 Nuovo Slider Look-ahead
+                SliderSettingRow(
+                    title: "Look-ahead",
+                    value: $settings.repLookAheadMs,
+                    range: 50...400,
+                    step: 10,
+                    unit: "ms",
+                    description: lookAheadDescription
+                )
+
+                Text(lookAheadDescription)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.vertical, 4)
+
             } header: {
                 Text("Elaborazione Segnale")
             } footer: {
-                Text("Numero di campioni per la media mobile. Valori più alti = segnale più filtrato ma meno reattivo.")
+                Text("Numero di campioni per la media mobile e finestra di look-ahead (ritardo in ms per confermare la rep).")
             }
             
             // MARK: - Velocity Thresholds (Legacy - kept for compatibility)
@@ -271,6 +291,13 @@ struct RepDetectionSettingsView: View {
         }
     }
     
+    private var lookAheadDescription: String {
+        switch settings.repLookAheadMs {
+        case ..<100: return "⚡ Molto reattivo"
+        case ..<200: return "✅ Bilanciato (consigliato)"
+        default:     return "🎯 Stabile, ma più lento a reagire"
+        }
+    }
     // MARK: - Actions
     
     private func resetToDefaults() {
@@ -282,6 +309,7 @@ struct RepDetectionSettingsView: View {
         settings.repMinVelocity = 0.10
         settings.repMinPeakVelocity = 0.15
         settings.repMinAcceleration = 2.5
+        settings.repLookAheadMs = 200
         
         print("🔄 Parametri rilevamento ripristinati ai valori predefiniti")
     }

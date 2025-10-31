@@ -2,8 +2,6 @@
 //  HomeView.swift
 //  VBTTracker
 //
-//  MODIFICHE: Aggiunto link Test Multi-Axis nella sezione Quick Actions
-//
 
 import SwiftUI
 
@@ -11,36 +9,37 @@ struct HomeView: View {
     @StateObject private var bleManager = BLEManager()
     @ObservedObject var settings = SettingsManager.shared
     @StateObject private var calibrationManager = CalibrationManager()
-    
+
     @State private var showSettings = false
-    
+    @State private var showZonesEditor = false  // 👈 Per aprire la vista delle zone
+
     var body: some View {
         NavigationStack {
             ZStack {
-                // Background gradient
                 LinearGradient(
                     colors: [Color.blue.opacity(0.1), Color.purple.opacity(0.05)],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
                 .ignoresSafeArea()
-                
+
                 ScrollView {
                     VStack(spacing: 24) {
-                        // Hero Section
                         heroSection
-                        
-                        // Sensor Status Card
                         sensorStatusCard
-                        
-                        // Quick Actions
                         quickActionsSection
-                        
-                        // Training Zones Preview
-                        trainingZonesPreview
                     }
                     .padding()
                 }
+                .gesture(
+                    DragGesture()
+                        .onEnded { value in
+                            // Swipe verso destra → mostra zone
+                            if value.translation.width > 100 {
+                                showZonesEditor = true
+                            }
+                        }
+                )
             }
             .navigationTitle("VBT Tracker")
             .toolbar {
@@ -57,81 +56,86 @@ struct HomeView: View {
                     calibrationManager: calibrationManager
                 )
             }
+            .sheet(isPresented: $showZonesEditor) {
+                VelocityRangesEditorView()
+            }
             .onAppear {
                 loadSavedCalibration()
                 attemptAutoConnect()
             }
         }
     }
-    
-    // MARK: - Hero Section
-    
+
+    // MARK: - Hero
+
     private var heroSection: some View {
         VStack(spacing: 12) {
             Image(systemName: "figure.strengthtraining.traditional")
                 .font(.system(size: 70))
                 .foregroundStyle(
-                    LinearGradient(
-                        colors: [.blue, .purple],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
+                    LinearGradient(colors: [.blue, .purple],
+                                   startPoint: .topLeading,
+                                   endPoint: .bottomTrailing)
                 )
-            
+
             Text("Velocity Based Training")
-                .font(.title2)
-                .fontWeight(.bold)
-            
+                .font(.title2).fontWeight(.bold)
             Text("Allena con precisione scientifica")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
         .padding(.vertical)
     }
-    
-    // MARK: - Sensor Status Card
-    
+
+    // MARK: - Sensor Card
+
     private var sensorStatusCard: some View {
         VStack(spacing: 16) {
-            HStack {
+            HStack(alignment: .top) {
                 Circle()
                     .fill(bleManager.isConnected ? Color.green : Color.gray)
                     .frame(width: 12, height: 12)
-                
-                VStack(alignment: .leading, spacing: 4) {
+                    .padding(.top, 4)
+
+                VStack(alignment: .leading, spacing: 6) {
                     Text(bleManager.sensorName)
                         .font(.headline)
-                    
+
                     Text(bleManager.statusMessage)
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                }
-                
-                Spacer()
-                
-                // Calibration badge
-                if bleManager.isCalibrated {
-                    HStack(spacing: 4) {
-                        Image(systemName: "checkmark.seal.fill")
-                            .font(.caption2)
-                        Text("Calibrato")
-                            .font(.caption2)
+
+                    HStack(spacing: 8) {
+                        if let sr = bleManager.sampleRateHz {
+                            Label(formatSampleRate(sr), systemImage: "waveform.path.ecg")
+                                .font(.caption2)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(Color.blue.opacity(0.12))
+                                .foregroundStyle(.blue)
+                                .clipShape(Capsule())
+                        }
+                        if bleManager.isCalibrated {
+                            Label("Calibrato", systemImage: "checkmark.seal.fill")
+                                .font(.caption2)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(Color.green.opacity(0.15))
+                                .foregroundStyle(.green)
+                                .clipShape(Capsule())
+                        }
                     }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Color.green)
-                    .cornerRadius(8)
                 }
-            }
-            
-            // Connection button if not connected
-            if !bleManager.isConnected {
-                Button(action: { showSettings = true }) {
-                    Label("Connetti Sensore", systemImage: "sensor.fill")
-                        .frame(maxWidth: .infinity)
+
+                Spacer()
+
+                if !bleManager.isConnected {
+                    Button(action: { showSettings = true }) {
+                        Label("Connetti", systemImage: "sensor.fill")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.borderedProminent)
                 }
-                .buttonStyle(.borderedProminent)
             }
         }
         .padding()
@@ -139,190 +143,76 @@ struct HomeView: View {
         .cornerRadius(16)
         .shadow(color: .black.opacity(0.1), radius: 5, x: 0, y: 2)
     }
-    
+
     // MARK: - Quick Actions
-    
+
     private var quickActionsSection: some View {
         VStack(spacing: 16) {
-            Text("Azioni Rapide")
-                .font(.headline)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            
-            // Start Training (main CTA)
-            NavigationLink(destination: TrainingSelectionView(
-                bleManager: bleManager
-            )) {
+            HStack {
+                Text("Azioni Rapide").font(.headline)
+                Spacer()
+                // 👈 RIMOSSO il pulsante "Mostra Zone"
+            }
+
+            NavigationLink(destination: TrainingSelectionView(bleManager: bleManager)) {
                 HStack {
                     Image(systemName: "play.circle.fill")
                         .font(.title2)
-                    
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Inizia Allenamento")
-                            .font(.headline)
+                        Text("Inizia Allenamento").font(.headline)
                         Text("Scegli obiettivo e inizia")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .font(.caption).foregroundStyle(.secondary)
                     }
-                    
                     Spacer()
-                    
                     Image(systemName: "chevron.right")
                         .foregroundStyle(.secondary)
                 }
                 .padding()
                 .background(
-                    LinearGradient(
-                        colors: [Color.blue, Color.blue.opacity(0.8)],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
+                    LinearGradient(colors: [Color.blue, Color.blue.opacity(0.8)],
+                                   startPoint: .leading, endPoint: .trailing)
                 )
                 .foregroundStyle(.white)
                 .cornerRadius(16)
                 .shadow(color: .blue.opacity(0.3), radius: 8, x: 0, y: 4)
             }
-            .disabled(!bleManager.isConnected || !bleManager.isCalibrated)
-            
-            // ⭐ NUOVO: Test Multi-Axis Detection (DEBUG)
-            NavigationLink(destination: TestMultiAxisView(bleManager: bleManager)) {
-                HStack {
-                    Image(systemName: "ant.circle.fill")
-                        .font(.title2)
-                    
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Test Multi-Axis Detection")
-                            .font(.headline)
-                        Text("Debug: Z-only vs Multi-Axis+Gyro")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    
-                    Spacer()
-                    
-                    Image(systemName: "chevron.right")
-                        .foregroundStyle(.secondary)
-                }
-                .padding()
-                .background(Color.purple.opacity(0.15))
-                .foregroundStyle(.purple)
-                .cornerRadius(12)
-            }
             .disabled(!bleManager.isConnected)
-        }
-    }
-    
-    // MARK: - Training Zones Preview
-    
-    private var trainingZonesPreview: some View {
-        VStack(spacing: 12) {
-            HStack {
-                Text("Zone di Allenamento")
-                    .font(.headline)
-                
-                Spacer()
-                
-                Button(action: { showSettings = true }) {
-                    Text("Modifica")
-                        .font(.caption)
-                        .foregroundStyle(.blue)
-                }
-            }
             
-            VStack(spacing: 8) {
-                TrainingZoneRow(
-                    zone: .maxStrength,
-                    range: settings.velocityRanges.maxStrength
-                )
-                TrainingZoneRow(
-                    zone: .strength,
-                    range: settings.velocityRanges.strength
-                )
-                TrainingZoneRow(
-                    zone: .strengthSpeed,
-                    range: settings.velocityRanges.strengthSpeed
-                )
-                TrainingZoneRow(
-                    zone: .speed,
-                    range: settings.velocityRanges.speed
-                )
-            }
+            // 💡 OPZIONALE: aggiungi un hint visivo per lo swipe
+            Text("💡 Swipe verso destra per vedere le zone di allenamento")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.top, 8)
         }
-        .padding()
-        .background(Color(.systemBackground))
-        .cornerRadius(16)
-        .shadow(color: .black.opacity(0.1), radius: 5, x: 0, y: 2)
     }
-    
-    // MARK: - Helper Methods
-    
+
+    // MARK: - Helpers
+
     private func loadSavedCalibration() {
         if let calibration = settings.savedCalibration {
             bleManager.applyCalibration(calibration)
             print("📥 Calibrazione caricata da settings")
         }
     }
-    
+
     private func attemptAutoConnect() {
-        // TODO: Implement auto-reconnect to last sensor
-        if let mac = settings.lastConnectedSensorMAC {
-            print("🔄 Tentativo auto-connessione a: \(mac)")
-            // bleManager.connectToMAC(mac)
-        }
-    }
-}
-
-// MARK: - Supporting Views
-
-struct QuickActionCard: View {
-    let icon: String
-    let title: String
-    let color: Color
-    
-    var body: some View {
-        VStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(.title2)
-                .foregroundStyle(color)
-            
-            Text(title)
-                .font(.caption)
-                .fontWeight(.medium)
-        }
-        .frame(maxWidth: .infinity)
-        .padding()
-        .background(color.opacity(0.1))
-        .cornerRadius(12)
-    }
-}
-
-struct TrainingZoneRow: View {
-    let zone: TrainingZone
-    let range: ClosedRange<Double>
-    
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: zone.icon)
-                .font(.title3)
-                .foregroundStyle(zone.color)
-                .frame(width: 30)
-            
-            VStack(alignment: .leading, spacing: 2) {
-                Text(zone.rawValue)
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                
-                Text("\(String(format: "%.2f", range.lowerBound)) - \(String(format: "%.2f", range.upperBound)) m/s")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+        if let id = settings.lastConnectedPeripheralID {
+            print("🔄 Tentativo auto-riconnessione a peripheralID: \(id)")
+            DispatchQueue.main.async { [bleManager] in
+                bleManager.attemptAutoReconnect(with: id)
             }
-            
-            Spacer()
+        } else {
+            print("ℹ️ Nessun dispositivo salvato per auto-connessione")
         }
-        .padding(.vertical, 8)
-        .padding(.horizontal, 12)
-        .background(zone.color.opacity(0.1))
-        .cornerRadius(8)
     }
+}
+
+// MARK: - Utils
+
+private func formatSampleRate(_ hz: Double?) -> String {
+    guard let hz, hz > 0 else { return "—" }
+    return hz >= 100 ? "\(Int(round(hz))) Hz" : String(format: "%.1f Hz", hz)
 }
 
 #Preview {
