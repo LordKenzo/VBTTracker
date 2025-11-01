@@ -13,6 +13,8 @@ class SettingsManager: ObservableObject {
     static let shared = SettingsManager()
     
     // MARK: - Published Properties
+    @Published var repLookAheadMs: Double = 200.0  // durata in millisecondi
+
     @Published var velocityMeasurementMode: VBTRepDetector.VelocityMeasurementMode {
         didSet { save() }
     }
@@ -93,6 +95,16 @@ class SettingsManager: ObservableObject {
         didSet { save() }
     }
     
+    // MARK: - Ultimo sensore
+    @Published var lastConnectedPeripheralID: String? {
+        didSet { UserDefaults.standard.set(lastConnectedPeripheralID, forKey: "lastPeripheralID") }
+    }
+
+    private func loadLastPeripheralID() {
+        lastConnectedPeripheralID = UserDefaults.standard.string(forKey: "lastPeripheralID")
+    }
+    
+    
     // MARK: - UserDefaults Keys
     
     private enum Keys {
@@ -139,7 +151,8 @@ class SettingsManager: ObservableObject {
         let loadedMinAccel = UserDefaults.standard.double(forKey: Keys.repMinAcceleration)
         let loadedEccentricThreshold = UserDefaults.standard.double(forKey: Keys.repEccentricThreshold)
            repEccentricThreshold = loadedEccentricThreshold == 0 ? 0.15 : loadedEccentricThreshold  // Default 0.15g
-          
+        
+
 
         repMinVelocity = loadedMinVel == 0 ? 0.10 : loadedMinVel
         repMinPeakVelocity = loadedMinPeak == 0 ? 0.15 : loadedMinPeak
@@ -171,6 +184,9 @@ class SettingsManager: ObservableObject {
 
         let loadedVelocityMode = UserDefaults.standard.string(forKey: Keys.velocityMode) ?? "concentricOnly"
            velocityMeasurementMode = loadedVelocityMode == "fullROM" ? .fullROM : .concentricOnly
+        
+        loadLastPeripheralID()
+
            
         print("✅ SettingsManager inizializzato")
     }
@@ -257,7 +273,7 @@ class SettingsManager: ObservableObject {
         voiceLanguage = "it-IT"
         velocityMeasurementMode = .concentricOnly
         repMinTimeBetween = 0.8
-        repMinDuration = 0.3
+        repMinDuration = 0.45
         repMinAmplitude = 0.45
         repSmoothingWindow = 10
         repEccentricThreshold = 0.15

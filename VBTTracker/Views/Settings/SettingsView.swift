@@ -3,7 +3,7 @@
 //  VBTTracker
 //
 //  Hub principale impostazioni - Architettura modulare
-//  ✅ CLEAN: Rimosso codice cinematico, aggiunto picker algoritmo
+//  CLEAN: Rimosso codice cinematico, aggiunto picker algoritmo
 //
 
 import SwiftUI
@@ -11,9 +11,9 @@ import SwiftUI
 // MARK: - Detection Algorithm Enum
 enum RepDetectionAlgorithm: String, CaseIterable, Identifiable {
     case zAxisSimple = "Asse Z (Semplice)"
-    // case zAxisML = "Asse Z + ML"           // 🔜 Futuro
-    // case multiAxisKinematic = "Multi-Asse" // 🔜 Futuro
-    // case visionIMU = "Vision + IMU"        // 🔜 Futuro
+    // case zAxisML = "Asse Z + ML"           // ðŸ”œ Futuro
+    // case multiAxisKinematic = "Multi-Asse" // ðŸ”œ Futuro
+    // case visionIMU = "Vision + IMU"        // ðŸ”œ Futuro
     
     var id: String { self.rawValue }
     
@@ -39,7 +39,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) var dismiss
     @State private var showResetAlert = false
     
-    // ✅ Nuovo: Selezione algoritmo (attualmente solo Z-Axis)
+    // Nuovo: Selezione algoritmo (attualmente solo Z-Axis)
     @AppStorage("selectedDetectionAlgorithm") private var selectedAlgorithmRaw = RepDetectionAlgorithm.zAxisSimple.rawValue
     
     private var selectedAlgorithm: RepDetectionAlgorithm {
@@ -87,7 +87,7 @@ struct SettingsView: View {
                     .padding(.vertical, 4)
                     
                 } header: {
-                    Text("⚙️ Algoritmo Detection")
+                    Text("Algoritmo Detection")
                 } footer: {
                     Text("L'algoritmo Asse Z utilizza un pattern semplice basato su picchi e valli dell'accelerazione verticale. Ottimizzato per movimenti balistici come panca, squat e stacchi.")
                 }
@@ -107,10 +107,30 @@ struct SettingsView: View {
                         )
                     }
                     
-                    // Velocità
+                    // Pattern Appresi (🆕)
+                    NavigationLink(destination: LearnedPatternsView()) {
+                        NavigationSettingRow(
+                            title: "Pattern Appresi",
+                            subtitle: patternSubtitle,
+                            icon: "brain.head.profile",
+                            iconColor: .purple
+                        )
+                    }
+                    
+                    // Registra Nuovo Pattern (🆕)
+                    NavigationLink(destination: RecordPatternView(bleManager: bleManager)) {
+                        NavigationSettingRow(
+                            title: "Registra Pattern",
+                            subtitle: "Registra manualmente un nuovo pattern",
+                            icon: "waveform.badge.plus",
+                            iconColor: .red,
+                            badge: "Nuovo"
+                        )
+                    }
+                    
                     NavigationLink(destination: VelocitySettingsView()) {
                         NavigationSettingRow(
-                            title: "Velocità",
+                            title: "Velocità ",
                             subtitle: "Zone VBT e Velocity Loss",
                             icon: "speedometer",
                             iconColor: .blue
@@ -209,7 +229,7 @@ struct SettingsView: View {
     
     private var sensorSubtitle: String {
         if bleManager.isConnected {
-            return "\(bleManager.sensorName) • Connesso"
+            return "\(bleManager.sensorName) Connesso"
         } else {
             return "Nessun sensore connesso"
         }
@@ -218,13 +238,23 @@ struct SettingsView: View {
     private var audioSubtitle: String {
         if settings.voiceFeedbackEnabled {
             let language = settings.voiceLanguage == "it-IT" ? "Italiano" : "English"
-            return "Attivo • \(language)"
+            return "Attivo \(language)"
         } else {
             return "Disattivato"
         }
     }
+    
+    private var patternSubtitle: String {
+        let count = LearnedPatternLibrary.shared.patterns.count
+        if count == 0 {
+            return "Nessun pattern salvato"
+        } else if count == 1 {
+            return "1 pattern salvato"
+        } else {
+            return "\(count) pattern salvati"
+        }
+    }
 }
-
 // MARK: - NotificationCenter Extension
 extension Notification.Name {
     static let detectionAlgorithmChanged = Notification.Name("detectionAlgorithmChanged")

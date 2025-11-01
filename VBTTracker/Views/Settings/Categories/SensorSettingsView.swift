@@ -105,9 +105,7 @@ struct SensorSettingsView: View {
                         Image(systemName: "waveform.path")
                             .foregroundStyle(.blue)
                             .frame(width: 24)
-                        Text("Frequenza")
-                        Spacer()
-                        Text("200 Hz")
+                        Text("\(Int(bleManager.sampleRateHz ?? 0)) Hz")
                             .foregroundStyle(.secondary)
                     }
                     
@@ -146,6 +144,12 @@ struct SensorSettingsView: View {
         }
     }
     
+    private func formatSR(_ hz: Double?) -> String {
+        guard let hz = hz, hz > 0 else { return "—" }
+        if hz >= 100 { return "\(Int(round(hz))) Hz" }
+        return String(format: "%.1f Hz", hz)
+    }
+    
     // MARK: - Sensor Status Row
     
     private var sensorStatusRow: some View {
@@ -172,6 +176,12 @@ struct SensorSettingsView: View {
             }
             
             Spacer()
+            HStack {
+                Text("Frequenza stimata")
+                Spacer()
+                Text(formatSR(bleManager.sampleRateHz))
+                    .foregroundStyle(.secondary)
+            }
             
             if bleManager.isConnected {
                 Image(systemName: "checkmark.circle.fill")
