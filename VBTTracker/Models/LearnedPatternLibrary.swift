@@ -124,9 +124,9 @@ final class LearnedPatternLibrary: ObservableObject {
         do {
             let data = try JSONEncoder().encode(patterns)
             try data.write(to: saveURL)
-            print("ðŸ’¾ Libreria pattern salvata (\(patterns.count))")
+            print("Libreria pattern salvata (\(patterns.count))")
         } catch {
-            print("âš ï¸ Errore salvataggio libreria pattern: \(error)")
+            print("Errore salvataggio libreria pattern: \(error)")
         }
     }
 
@@ -134,10 +134,10 @@ final class LearnedPatternLibrary: ObservableObject {
         do {
             let data = try Data(contentsOf: saveURL)
             patterns = try JSONDecoder().decode([PatternSequence].self, from: data)
-            print("ðŸ“¥ Libreria pattern caricata (\(patterns.count))")
+            print("Libreria pattern caricata (\(patterns.count))")
         } catch {
             patterns = []
-            print("â„¹ï¸ Nessuna libreria pattern trovata (prima esecuzione)")
+            print("Nessuna libreria pattern trovata (prima esecuzione)")
         }
     }
 }

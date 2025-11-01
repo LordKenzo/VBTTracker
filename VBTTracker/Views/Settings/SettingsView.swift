@@ -3,7 +3,7 @@
 //  VBTTracker
 //
 //  Hub principale impostazioni - Architettura modulare
-//  âœ… CLEAN: Rimosso codice cinematico, aggiunto picker algoritmo
+//  CLEAN: Rimosso codice cinematico, aggiunto picker algoritmo
 //
 
 import SwiftUI
@@ -39,7 +39,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) var dismiss
     @State private var showResetAlert = false
     
-    // âœ… Nuovo: Selezione algoritmo (attualmente solo Z-Axis)
+    // Nuovo: Selezione algoritmo (attualmente solo Z-Axis)
     @AppStorage("selectedDetectionAlgorithm") private var selectedAlgorithmRaw = RepDetectionAlgorithm.zAxisSimple.rawValue
     
     private var selectedAlgorithm: RepDetectionAlgorithm {
@@ -87,7 +87,7 @@ struct SettingsView: View {
                     .padding(.vertical, 4)
                     
                 } header: {
-                    Text("âš™ï¸ Algoritmo Detection")
+                    Text("Algoritmo Detection")
                 } footer: {
                     Text("L'algoritmo Asse Z utilizza un pattern semplice basato su picchi e valli dell'accelerazione verticale. Ottimizzato per movimenti balistici come panca, squat e stacchi.")
                 }
@@ -130,7 +130,7 @@ struct SettingsView: View {
                     
                     NavigationLink(destination: VelocitySettingsView()) {
                         NavigationSettingRow(
-                            title: "VelocitÃ ",
+                            title: "Velocità ",
                             subtitle: "Zone VBT e Velocity Loss",
                             icon: "speedometer",
                             iconColor: .blue
@@ -229,7 +229,7 @@ struct SettingsView: View {
     
     private var sensorSubtitle: String {
         if bleManager.isConnected {
-            return "\(bleManager.sensorName) â€¢ Connesso"
+            return "\(bleManager.sensorName) Connesso"
         } else {
             return "Nessun sensore connesso"
         }
@@ -238,7 +238,7 @@ struct SettingsView: View {
     private var audioSubtitle: String {
         if settings.voiceFeedbackEnabled {
             let language = settings.voiceLanguage == "it-IT" ? "Italiano" : "English"
-            return "Attivo â€¢ \(language)"
+            return "Attivo \(language)"
         } else {
             return "Disattivato"
         }

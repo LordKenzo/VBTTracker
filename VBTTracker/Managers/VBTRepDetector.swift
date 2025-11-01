@@ -2,9 +2,9 @@
 //  VBTRepDetector.swift
 //  VBTTracker
 //
-//  âœ… Scientific VBT: MPV/PPV corretti (SÃ¡nchez-Medina et al. 2010)
-//  âœ… Integrato con LearnedPatternLibrary
-//  âœ… Compatibile con Swift 6
+//  Scientific VBT: MPV/PPV corretti (Sànchez-Medina et al. 2010)
+//  Integrato con LearnedPatternLibrary
+//  Compatibile con Swift 6
 //
 
 import Foundation
@@ -150,7 +150,7 @@ final class VBTRepDetector {
 
         if newDirection != currentDirection && newDirection != .none {
 
-            // Inversione â†’ VALLE
+            // Inversione a VALLE
             if newDirection == .up && currentDirection == .down {
                 let valley = findRecentMin(lookback: 3)
                 lastValley = (valley, idx, now)
@@ -159,7 +159,7 @@ final class VBTRepDetector {
                 onPhaseChange?(.ascending)
             }
 
-            // Inversione â†’ PICCO
+            // Inversione a PICCO
             if newDirection == .down && currentDirection == .up {
                 let peak = findRecentMax(lookback: 3)
                 lastPeak = (peak, idx, now)
@@ -288,10 +288,10 @@ extension VBTRepDetector {
             if let match = LearnedPatternLibrary.shared.matchPattern(for: samples) {
                 let dist = LearnedPatternLibrary.shared.distance(match.featureVector, match.featureVector)
                 if dist < 0.35 {
-                    print("ðŸ¤– Pattern riconosciuto: \(match.label) â€” \(match.repCount) reps")
+                    print("Pattern riconosciuto: \(match.label) \(match.repCount) reps")
                     learnedPattern = LearnedPattern(from: match)
                 } else {
-                    print("â„¹ï¸ Nessun pattern simile (dist \(String(format: "%.3f", dist)))")
+                    print("Nessun pattern simile (dist \(String(format: "%.3f", dist)))")
                 }
             }
         }
@@ -319,7 +319,7 @@ extension VBTRepDetector {
 
         Task { @MainActor in
             LearnedPatternLibrary.shared.addPattern(new)
-            print("ðŸ’¾ Pattern salvato: \(label) â€” \(repCount) reps")
+            print("Pattern salvato: \(label) \(repCount) reps")
         }
     }
 }

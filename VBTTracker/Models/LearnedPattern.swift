@@ -5,11 +5,11 @@ struct LearnedPattern: Codable, Equatable, Sendable {
     let estimatedROM: Double
     /// Soglia dinamica di ampiezza in g per contare una rep
     let dynamicMinAmplitude: Double
-    /// VelocitÃ  media/picco tipica (m/s) usata come riferimento
+    /// Velocità  media/picco tipica (m/s) usata come riferimento
     let avgPeakVelocity: Double
     /// Durata media della fase concentrica (s)
     let avgConcentricDuration: Double
-    /// Soglia â€œfermoâ€ in g
+    /// Soglia in g
     let restThreshold: Double
 
     /// Inizializzatore canonico (usalo ovunque)
@@ -43,6 +43,6 @@ extension LearnedPattern {
         minThreshold: 0.40,            // ampiezza minima 0.4g
         avgVelocity: 0.80,             // 0.8 m/s tipica (forza)
         avgConcentricDuration: 0.9,    // ~0.9 s concentrico
-        restThreshold: 0.10            // 0.1g per considerare â€œfermoâ€
+        restThreshold: 0.10            // 0.1g per considerare
     )
 }
