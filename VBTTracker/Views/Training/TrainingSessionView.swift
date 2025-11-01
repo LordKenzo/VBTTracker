@@ -2,7 +2,7 @@
 //  TrainingSessionView.swift
 //  VBTTracker
 //
-//  UI FINALE con layout: Reps+Target in alto, Zona in basso
+//  STEP 2.5: Smart pattern loading dalla libreria (no UserDefaults)
 //
 
 import SwiftUI
@@ -103,11 +103,26 @@ struct TrainingSessionView: View {
             let fallbackHz = 1.0 / 0.02 // 50 Hz
             sessionManager.setSampleRateHz(bleManager.sampleRateHz ?? fallbackHz)
 
-            // Carica pattern ROM
-            if let data = UserDefaults.standard.data(forKey: "learnedPattern"),
-               let pattern = try? JSONDecoder().decode(LearnedPattern.self, from: data) {
-                sessionManager.repDetector.learnedPattern = pattern
-                print("📂 Pattern ROM caricato: \(String(format: "%.0fcm", pattern.estimatedROM * 100))")
+            // 🧠 STEP 2.5: Smart pattern loading dalla libreria
+            Task { @MainActor in
+                let library = LearnedPatternLibrary.shared
+                
+                if let bestMatch = library.patterns.first {
+                    // Usa il pattern più recente dalla libreria
+                    let pattern = LearnedPattern(
+                        rom: bestMatch.avgAmplitude,
+                        minThreshold: 0.40,
+                        avgVelocity: bestMatch.avgPPV,
+                        avgConcentricDuration: bestMatch.avgDuration,
+                        restThreshold: 0.10
+                    )
+                    sessionManager.repDetector.learnedPattern = pattern
+                    print("📚 Pattern dalla libreria: \(bestMatch.label) | ROM: \(String(format: "%.0fcm", bestMatch.avgAmplitude * 100))")
+                } else {
+                    // Fallback: usa default pattern se libreria vuota
+                    sessionManager.repDetector.learnedPattern = LearnedPattern.defaultPattern
+                    print("🔧 Pattern di default (libreria vuota)")
+                }
             }
 
             startDataStream()
@@ -229,80 +244,46 @@ struct TrainingSessionView: View {
         }
     }
     
-    // MARK: - 2. Velocità Card
+    // MARK: - 2. Compact Velocity Card
     
     private var compactVelocityCard: some View {
-        VStack(spacing: 8) {
-            HStack {
-                Text("VELOCITÀ")
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(.secondary)
-                
-                Spacer()
-            }
-            
-            HStack(spacing: 8) {
-                // Corrente
-                VStack(spacing: 4) {
-                    Text("Corrente")
-                        .font(.caption2)
+        VStack(spacing: 12) {
+            // Velocity + Zone
+            HStack(spacing: 16) {
+                // Velocità
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("VELOCITÀ")
+                        .font(.caption)
+                        .fontWeight(.semibold)
                         .foregroundStyle(.secondary)
                     
-                    Text(String(format: "%.2f", sessionManager.currentVelocity))
-                        .font(.title3)
-                        .fontWeight(.bold)
-                        .foregroundStyle(sessionManager.currentZone.color)
-                    
-                    Text("m/s")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
-                .background(sessionManager.currentZone.color.opacity(0.1))
-                .cornerRadius(8)
-                
-                // Picco
-                VStack(spacing: 4) {
-                    Text("Picco")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    
-                    Text(String(format: "%.2f", sessionManager.peakVelocity))
-                        .font(.title3)
-                        .fontWeight(.bold)
-                        .foregroundStyle(.purple)
-                    
-                    Text("m/s")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
-                .background(Color.purple.opacity(0.1))
-                .cornerRadius(8)
-                
-                // Media
-                if sessionManager.repCount > 0 {
-                    VStack(spacing: 4) {
-                        Text("Media")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        
-                        Text(String(format: "%.2f", sessionManager.meanVelocity))
-                            .font(.title3)
-                            .fontWeight(.bold)
-                            .foregroundStyle(.blue)
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        Text(String(format: "%.2f", sessionManager.currentVelocity))
+                            .font(.system(size: 36, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white)
                         
                         Text("m/s")
-                            .font(.caption2)
+                            .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                    .background(Color.blue.opacity(0.1))
-                    .cornerRadius(8)
+                }
+                
+                Spacer()
+                
+                // Zona corrente
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text("ZONA")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.secondary)
+                    
+                    Text(sessionManager.currentZone.rawValue)
+                        .font(.headline)
+                        .foregroundStyle(sessionManager.currentZone.color)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(sessionManager.currentZone.color.opacity(0.2))
+                        .cornerRadius(8)
                 }
             }
         }
@@ -312,30 +293,14 @@ struct TrainingSessionView: View {
         .shadow(radius: 2)
     }
     
-    // MARK: - 3. Grafico Card
+    // MARK: - 3. Compact Graph Card
     
     private var compactGraphCard: some View {
-        VStack(spacing: 8) {
-            HStack {
-                Text("SEGNALE ACCELERAZIONE")
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(.secondary)
-                
-                Spacer()
-                
-                // Indicatore REC
-                HStack(spacing: 4) {
-                    Circle()
-                        .fill(.red)
-                        .frame(width: 6, height: 6)
-                    
-                    Text("REC")
-                        .font(.caption2)
-                        .fontWeight(.bold)
-                        .foregroundStyle(.red)
-                }
-            }
+        VStack(alignment: .leading, spacing: 8) {
+            Text("ACCELERAZIONE")
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundStyle(.secondary)
             
             RealTimeAccelerationGraph(data: sessionManager.getAccelerationSamples())
                 .frame(height: 120)
@@ -346,31 +311,39 @@ struct TrainingSessionView: View {
         .shadow(radius: 2)
     }
     
-    // MARK: - 4. Feedback Ultima Rep Card
+    // MARK: - 4. Last Rep Feedback Card
     
     private var lastRepFeedbackCard: some View {
         HStack(spacing: 16) {
-            // Info Rep
-            VStack(alignment: .leading, spacing: 6) {
-                Text("ULTIMA RIPETIZIONE")
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(.secondary)
-                
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(String(format: "%.2f", sessionManager.lastRepPeakVelocity))
-                        .font(.system(size: 32, weight: .bold, design: .rounded))
-                        .foregroundStyle(.primary)
-                    
-                    Text("m/s")
+            // Info rep
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Image(systemName: "figure.strengthtraining.traditional")
+                        .foregroundStyle(.blue)
+                    Text("REP #\(sessionManager.repCount)")
                         .font(.headline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.primary)
                 }
                 
-                // Zona della rep
-                Text(getZoneForVelocity(sessionManager.lastRepPeakVelocity))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 16) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Velocità")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Text(String(format: "%.2f m/s", sessionManager.lastRepPeakVelocity))
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                    }
+                    
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Zona")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Text(getZoneForVelocity(sessionManager.lastRepPeakVelocity))
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                    }
+                }
             }
             
             Spacer()

@@ -2,17 +2,15 @@
 //  TrainingSelectionView.swift
 //  VBTTracker
 //
-//  AGGIORNATO con integrazione calibrazione ROM
+//  STEP 2.5: Rimossa calibrazione ROM - mantiene solo selezione zona
 //
 
 import SwiftUI
 
 struct TrainingSelectionView: View {
     @ObservedObject var bleManager: BLEManager
-    @StateObject private var calibrationManager = ROMCalibrationManager()
     
     @State private var selectedZone: TrainingZone = .strength
-    @State private var showCalibration = false
     @State private var navigateToSession = false
     
     var body: some View {
@@ -31,9 +29,6 @@ struct TrainingSelectionView: View {
                         // Sensor Status
                         sensorStatusCard
                         
-                        // Calibration Card
-                        calibrationCard
-                        
                         // Zone Selection
                         zoneSelectionCard
                         
@@ -45,12 +40,6 @@ struct TrainingSelectionView: View {
             }
             .navigationTitle("Setup Allenamento")
             .navigationBarTitleDisplayMode(.inline)
-            .sheet(isPresented: $showCalibration) {
-                CalibrationModeSelectionView(
-                    calibrationManager: calibrationManager,
-                    bleManager: bleManager
-                )
-            }
             .navigationDestination(isPresented: $navigateToSession) {
                 RepTargetSelectionView(
                     bleManager: bleManager,
@@ -95,102 +84,6 @@ struct TrainingSelectionView: View {
         .cornerRadius(12)
     }
     
-    // MARK: - Calibration Card
-    
-    private var calibrationCard: some View {
-        VStack(spacing: 16) {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Calibrazione Movimento")
-                        .font(.headline)
-                        .foregroundStyle(.white)
-                    
-                    if calibrationManager.isCalibrated {
-                        HStack(spacing: 8) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
-                            Text("Pattern appreso")
-                                .font(.subheadline)
-                                .foregroundStyle(.green)
-                        }
-                    } else {
-                        Text("Consigliata per nuovi esercizi")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                
-                Spacer()
-                
-                Image(systemName: calibrationManager.isCalibrated ?
-                      "brain.filled.head.profile" : "brain.head.profile")
-                    .font(.system(size: 40))
-                    .foregroundStyle(calibrationManager.isCalibrated ? .green : .blue)
-            }
-            
-            if let pattern = calibrationManager.learnedPattern {
-                Divider()
-                    .background(.white.opacity(0.2))
-                
-                HStack(spacing: 20) {
-                    CalibrationStat(
-                        icon: "ruler",
-                        label: "ROM",
-                        value: String(format: "%.0fcm", pattern.estimatedROM * 100)
-                    )
-                    
-                    CalibrationStat(
-                        icon: "gauge.with.dots.needle.67percent",
-                        label: "Velocità",
-                        value: String(format: "%.2fm/s", pattern.avgPeakVelocity)
-                    )
-                    
-                    CalibrationStat(
-                        icon: "timer",
-                        label: "Durata",
-                        value: String(format: "%.1fs", pattern.avgConcentricDuration)
-                    )
-                }
-            }
-            
-            HStack(spacing: 12) {
-                Button(action: {
-                    if calibrationManager.isCalibrated {
-                        calibrationManager.reset()
-                    }
-                    showCalibration = true
-                }) {
-                    Label(
-                        calibrationManager.isCalibrated ? "Ricalibra" : "Calibra Movimento",
-                        systemImage: calibrationManager.isCalibrated ? "arrow.clockwise" : "play.circle"
-                    )
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .tint(.blue)
-                
-                if calibrationManager.isCalibrated {
-                    Button(action: {
-                        calibrationManager.reset()
-                    }) {
-                        Image(systemName: "trash")
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(.red)
-                }
-            }
-        }
-        .padding()
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(Color.white.opacity(0.05))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(calibrationManager.isCalibrated ? Color.green.opacity(0.5) : Color.blue.opacity(0.3), lineWidth: 2)
-                )
-        )
-    }
-    
     // MARK: - Zone Selection Card
     
     private var zoneSelectionCard: some View {
@@ -230,14 +123,6 @@ struct TrainingSelectionView: View {
                 Text("Connetti il sensore per continuare")
                     .font(.caption)
                     .foregroundStyle(.red)
-            } else if !calibrationManager.isCalibrated {
-                HStack(spacing: 8) {
-                    Image(systemName: "info.circle")
-                        .foregroundStyle(.yellow)
-                    Text("Calibrazione consigliata ma non obbligatoria")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
             }
         }
     }
@@ -245,39 +130,11 @@ struct TrainingSelectionView: View {
     // MARK: - Actions
     
     private func startTraining() {
-        // 💾 Salva pattern per la prossima sessione
-        if calibrationManager.isCalibrated {
-            calibrationManager.savePattern()
-        }
-        
         navigateToSession = true
     }
 }
 
 // MARK: - Supporting Views
-
-struct CalibrationStat: View {
-    let icon: String
-    let label: String
-    let value: String
-    
-    var body: some View {
-        VStack(spacing: 4) {
-            Image(systemName: icon)
-                .font(.title3)
-                .foregroundStyle(.blue)
-            
-            Text(value)
-                .font(.headline)
-                .foregroundStyle(.white)
-            
-            Text(label)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-    }
-}
 
 struct ZoneRow: View {
     let zone: TrainingZone
@@ -292,7 +149,7 @@ struct ZoneRow: View {
                         .font(.headline)
                         .foregroundStyle(.white)
                     
-                    Text(zone.detailedDescription)  // ✅ Aggiornato
+                    Text(zone.detailedDescription)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -324,7 +181,7 @@ extension TrainingZone {
         [.maxStrength, .strength, .strengthSpeed, .speed, .maxSpeed, .tooSlow]
     }
     
-    var detailedDescription: String {  // ✅ Cambiato nome
+    var detailedDescription: String {
         switch self {
         case .maxStrength:
             return "Forza massimale (0.15-0.40 m/s)"
