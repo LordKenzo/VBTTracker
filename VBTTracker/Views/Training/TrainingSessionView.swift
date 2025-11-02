@@ -3,6 +3,7 @@
 //  VBTTracker
 //
 //  STEP 2.5: Smart pattern loading dalla libreria (no UserDefaults)
+//  ✅ AGGIUNTO: Salvataggio sessione a fine allenamento
 //
 
 import SwiftUI
@@ -19,6 +20,7 @@ struct TrainingSessionView: View {
     
     @State private var dataStreamTimer: Timer?
     @State private var showEndSessionAlert = false
+    @State private var showSaveSessionAlert = false
     
     @State private var showSummary = false
     @State private var sessionData: TrainingSessionData?
@@ -140,10 +142,23 @@ struct TrainingSessionView: View {
                 // Crea session data PRIMA di stoppare
                 sessionData = sessionManager.createSessionData()
                 sessionManager.stopRecording()
-                showSummary = true
+                
+                // Chiedi se salvare
+                showSaveSessionAlert = true
             }
         } message: {
             Text("Ripetizioni completate: \(sessionManager.repCount)/\(targetReps)")
+        }
+        .alert("Salvare Sessione?", isPresented: $showSaveSessionAlert) {
+            Button("Non Salvare", role: .cancel) {
+                showSummary = true
+            }
+            Button("Salva") {
+                saveSession()
+                showSummary = true
+            }
+        } message: {
+            Text("Vuoi salvare questa sessione nello storico degli allenamenti?")
         }
         .sheet(isPresented: $showSummary) {
             if let data = sessionData {
@@ -482,17 +497,6 @@ struct TrainingSessionView: View {
                 sessionManager.stopRecording()
             }
             
-            // Auto-stop al raggiungimento target
-            /*
-            if sessionManager.isRecording &&
-               sessionManager.repCount >= self.targetReps {
-                sessionManager.stopRecording()
-                
-                // Vibrazione + feedback
-                let generator = UINotificationFeedbackGenerator()
-                generator.notificationOccurred(.success)
-            }
-             */
             // Notifica visiva al raggiungimento target
             if sessionManager.isRecording &&
                sessionManager.repCount == self.targetReps {
@@ -500,9 +504,6 @@ struct TrainingSessionView: View {
                 // Haptic feedback
                 let generator = UINotificationFeedbackGenerator()
                 generator.notificationOccurred(.success)
-                
-                // Voice feedback opzionale
-                // voiceFeedback.announce("Target raggiunto")
             }
         }
     }
@@ -510,6 +511,17 @@ struct TrainingSessionView: View {
     private func stopDataStream() {
         dataStreamTimer?.invalidate()
         dataStreamTimer = nil
+    }
+    
+    // MARK: - Save Session
+    
+    private func saveSession() {
+        guard let data = sessionData else { return }
+        
+        let session = TrainingSession.from(data, targetReps: targetReps)
+        TrainingHistoryManager.shared.saveSession(session)
+        
+        print("💾 Sessione salvata nello storico")
     }
 }
 
