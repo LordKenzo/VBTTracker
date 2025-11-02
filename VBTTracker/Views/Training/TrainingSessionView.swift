@@ -12,6 +12,8 @@ struct TrainingSessionView: View {
     @ObservedObject var bleManager: BLEManager
     let targetZone: TrainingZone
     let targetReps: Int
+    let loadPercentage: Double?  // ✅ STEP 3: Pattern matching pesato
+    
     @ObservedObject var settings = SettingsManager.shared
 
     
@@ -105,25 +107,76 @@ struct TrainingSessionView: View {
             let fallbackHz = 1.0 / 0.02 // 50 Hz
             sessionManager.setSampleRateHz(bleManager.sampleRateHz ?? fallbackHz)
 
-            // 🧠 STEP 2.5: Smart pattern loading dalla libreria
+            // 🧠 STEP 3: Smart pattern loading con matching pesato
             Task { @MainActor in
                 let library = LearnedPatternLibrary.shared
+                let exerciseName = "Panca Piana"  // Per ora hardcoded
                 
-                if let bestMatch = library.patterns.first {
-                    // Usa il pattern più recente dalla libreria
-                    let pattern = LearnedPattern(
-                        rom: bestMatch.avgAmplitude,
-                        minThreshold: 0.40,
-                        avgVelocity: bestMatch.avgPPV,
-                        avgConcentricDuration: bestMatch.avgDuration,
-                        restThreshold: 0.10
-                    )
-                    sessionManager.repDetector.learnedPattern = pattern
-                    print("📚 Pattern dalla libreria: \(bestMatch.label) | ROM: \(String(format: "%.0fcm", bestMatch.avgAmplitude * 100))")
-                } else {
-                    // Fallback: usa default pattern se libreria vuota
+                guard !library.patterns.isEmpty else {
+                    // Nessun pattern salvato: usa default
                     sessionManager.repDetector.learnedPattern = LearnedPattern.defaultPattern
                     print("🔧 Pattern di default (libreria vuota)")
+                    return
+                }
+                
+                print("🔍 Ricerca pattern ottimale...")
+                print("   • Esercizio: \(exerciseName)")
+                if let load = loadPercentage {
+                    print("   • Carico target: \(Int(load))%")
+                }
+                
+                // ✅ Matching intelligente
+                var bestPattern: LearnedPattern?
+                
+                if let load = loadPercentage {
+                    // Usa matching pesato (70% feature + 30% carico)
+                    // Cerca pattern con carico simile
+                    let similarLoadPatterns = library.patterns.filter { pattern in
+                        guard let patternLoad = pattern.loadPercentage else { return false }
+                        let diff = abs(patternLoad - load)
+                        return diff <= 15.0  // ±15% è considerato "simile"
+                    }
+                    
+                    if !similarLoadPatterns.isEmpty {
+                        // Trova il più vicino
+                        let closest = similarLoadPatterns.min(by: { p1, p2 in
+                            let diff1 = abs((p1.loadPercentage ?? 0) - load)
+                            let diff2 = abs((p2.loadPercentage ?? 0) - load)
+                            return diff1 < diff2
+                        })!
+                        
+                        bestPattern = LearnedPattern(from: closest)
+                        
+                        print("✅ Pattern trovato con carico simile:")
+                        print("   • \(closest.label)")
+                        print("   • Carico pattern: \(Int(closest.loadPercentage ?? 0))% (diff: ±\(Int(abs((closest.loadPercentage ?? 0) - load)))%)")
+                        print("   • ROM: \(String(format: "%.0fcm", closest.avgAmplitude * 100))")
+                        print("   • \(closest.repCount) reps")
+                    } else {
+                        // Nessun match con carico: usa più recente
+                        let recent = library.patterns.first!
+                        bestPattern = LearnedPattern(from: recent)
+                        
+                        print("⚠️ Nessun pattern con carico \(Int(load))%, uso recente:")
+                        print("   • \(recent.label)")
+                        if let patternLoad = recent.loadPercentage {
+                            print("   • Carico: \(Int(patternLoad))%")
+                        }
+                    }
+                } else {
+                    // Nessuna info carico: usa pattern più recente
+                    let recent = library.patterns.first!
+                    bestPattern = LearnedPattern(from: recent)
+                    
+                    print("📚 Pattern dalla libreria (no carico):")
+                    print("   • \(recent.label)")
+                    print("   • ROM: \(String(format: "%.0fcm", recent.avgAmplitude * 100))")
+                }
+                
+                // Applica pattern
+                if let pattern = bestPattern {
+                    sessionManager.repDetector.learnedPattern = pattern
+                    print("🎯 Pattern caricato e attivo!")
                 }
             }
 
@@ -518,10 +571,32 @@ struct TrainingSessionView: View {
     private func saveSession() {
         guard let data = sessionData else { return }
         
+        // 1. Salva sessione nello storico
         let session = TrainingSession.from(data, targetReps: targetReps)
         TrainingHistoryManager.shared.saveSession(session)
-        
         print("💾 Sessione salvata nello storico")
+        
+        // 2. ✅ STEP 3: Salva pattern se sessione completata con successo
+        if data.wasSuccessful && data.totalReps >= 3 {
+            let exerciseName = "Panca Piana"  // Per ora hardcoded
+            
+            // Salva pattern con informazioni complete
+            sessionManager.repDetector.savePatternSequence(
+                label: exerciseName,
+                repCount: data.totalReps,
+                loadPercentage: loadPercentage
+            )
+            
+            print("🧠 Pattern salvato in libreria:")
+            print("   • Esercizio: \(exerciseName)")
+            print("   • Reps: \(data.totalReps)")
+            if let load = loadPercentage {
+                print("   • Carico: \(Int(load))%")
+            }
+            print("   • MPV medio: \(String(format: "%.3f", data.reps.map(\.meanVelocity).reduce(0, +) / Double(data.reps.count))) m/s")
+        } else {
+            print("⚠️ Pattern non salvato (sessione non completata o <3 reps)")
+        }
     }
 }
 
@@ -579,7 +654,8 @@ struct RepToastView: View {
         TrainingSessionView(
             bleManager: BLEManager(),
             targetZone: .strength,
-            targetReps: 5
+            targetReps: 5,
+            loadPercentage: 70
         )
     }
 }

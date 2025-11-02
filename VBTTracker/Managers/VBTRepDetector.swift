@@ -2,8 +2,9 @@
 //  VBTRepDetector.swift
 //  VBTTracker
 //
-//  Scientific VBT: MPV/PPV corretti (Sànchez-Medina et al. 2010)
+//  Scientific VBT: MPV/PPV corretti (Sánchez-Medina et al. 2010)
 //  Integrato con LearnedPatternLibrary
+//  STEP 3: Con correzioni makeFeatureVector statico
 //  Compatibile con Swift 6
 //
 
@@ -281,12 +282,38 @@ struct RepDetectionResult {
 // MARK: - Pattern Learning Integration
 
 extension VBTRepDetector {
+    
+    // ✅ CORREZIONE: Metodo statico per calcolare feature vector
+    private static func makeFeatureVector(from samples: [AccelerationSample]) -> [Double] {
+        guard samples.count > 3 else { return [] }
+        
+        let accZ = samples.map(\.accZ)
+        
+        let mean = accZ.reduce(0, +) / Double(accZ.count)
+        let std = sqrt(accZ.map { pow($0 - mean, 2) }.reduce(0, +) / Double(accZ.count))
+        let range = (accZ.max() ?? 0) - (accZ.min() ?? 0)
+        let diffs = zip(accZ.dropFirst(), accZ).map { $0 - $1 }
+        let spectralEnergy = sqrt(diffs.map { $0 * $0 }.reduce(0, +) / Double(diffs.count))
+        
+        return [
+            mean,
+            std,
+            range / 2.0,
+            spectralEnergy,
+            Double(samples.count) / 100.0
+        ]
+    }
+    
     func recognizePatternIfPossible() {
         guard samples.count > 30 else { return }
 
         Task { @MainActor in
             if let match = LearnedPatternLibrary.shared.matchPattern(for: samples) {
-                let dist = LearnedPatternLibrary.shared.distance(match.featureVector, match.featureVector)
+                // ✅ Usa metodo statico
+                let features = Self.makeFeatureVector(from: samples)
+                guard !features.isEmpty else { return }
+                
+                let dist = LearnedPatternLibrary.shared.distance(match.featureVector, features)
                 if dist < 0.35 {
                     print("Pattern riconosciuto: \(match.label) \(match.repCount) reps")
                     learnedPattern = LearnedPattern(from: match)
@@ -302,7 +329,10 @@ extension VBTRepDetector {
 
         let amp = (samples.map { $0.accZ }.max() ?? 0) - (samples.map { $0.accZ }.min() ?? 0)
         let duration = (samples.last?.timestamp.timeIntervalSince(samples.first?.timestamp ?? Date())) ?? 0
-        let features = samples.isEmpty ? [] : samples.suffix(100).map { $0.accZ }
+        
+        // ✅ Usa metodo statico
+        let features = Self.makeFeatureVector(from: samples)
+        guard !features.isEmpty else { return }
 
         let new = PatternSequence(
             id: UUID(),

@@ -93,7 +93,7 @@ struct RepDetectionSettingsView: View {
             }
             
             // MARK: - Signal Processing
-            // MARK: - Signal Processing
+
             Section {
                 // 1️⃣ Stepper smoothing window
                 Stepper(
@@ -127,12 +127,6 @@ struct RepDetectionSettingsView: View {
                     unit: "ms",
                     description: lookAheadDescription
                 )
-
-                Text(lookAheadDescription)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.vertical, 4)
 
             } header: {
                 Text("Elaborazione Segnale")

@@ -22,6 +22,10 @@ struct RepTargetSelectionView: View {
     @State private var targetReps: Int = 5
     @State private var navigateToSession = false
     
+    // ✅ STEP 3: Info esercizio e carico
+    @State private var loadPercentage: Double? = nil
+    @State private var showExerciseInfo = false
+    
     var body: some View {
         ZStack {
             // Background
@@ -124,6 +128,50 @@ struct RepTargetSelectionView: View {
                 
                 Spacer()
                 
+                // ✅ STEP 3: Info Allenamento button
+                Button(action: { showExerciseInfo = true }) {
+                    HStack(spacing: 12) {
+                        Image(systemName: "info.circle.fill")
+                            .font(.title3)
+                        
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Info Allenamento")
+                                .font(.headline)
+                            
+                            if let load = loadPercentage {
+                                Text("Carico: \(Int(load))%")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                Text("Imposta % carico")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        
+                        Spacer()
+                        
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                    .padding()
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(loadPercentage != nil ?
+                                  Color.blue.opacity(0.2) :
+                                  Color.white.opacity(0.05))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(loadPercentage != nil ?
+                                    Color.blue :
+                                    Color.white.opacity(0.1),
+                                    lineWidth: loadPercentage != nil ? 2 : 1)
+                    )
+                }
+                .foregroundStyle(.white)
+                
                 // Start button
                 Button(action: { navigateToSession = true }) {
                     Label("Inizia Allenamento", systemImage: "play.fill")
@@ -143,8 +191,12 @@ struct RepTargetSelectionView: View {
             TrainingSessionView(
                 bleManager: bleManager,
                 targetZone: targetZone,
-                targetReps: targetReps  // ✅ Passa il target
+                targetReps: targetReps,
+                loadPercentage: loadPercentage
             )
+        }
+        .sheet(isPresented: $showExerciseInfo) {
+            ExerciseInfoSheet(loadPercentage: $loadPercentage)
         }
     }
     
@@ -168,7 +220,7 @@ struct RepTargetSelectionView: View {
         }
     }
     
-    /// Rep raccomandate (metà del range)
+    /// Rep raccomandate (metÃ  del range)
     private var recommendedReps: Int {
         (repRange.lowerBound + repRange.upperBound) / 2
     }
