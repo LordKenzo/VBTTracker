@@ -93,7 +93,7 @@ struct RepDetectionSettingsView: View {
             }
             
             // MARK: - Signal Processing
-            // MARK: - Signal Processing
+
             Section {
                 // 1️⃣ Stepper smoothing window
                 Stepper(

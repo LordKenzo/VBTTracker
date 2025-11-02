@@ -35,6 +35,7 @@ struct SettingsView: View {
     @ObservedObject var bleManager: BLEManager
     @ObservedObject var calibrationManager: CalibrationManager
     @ObservedObject var settings = SettingsManager.shared
+    @ObservedObject private var patternLibrary = LearnedPatternLibrary.shared
     
     @Environment(\.dismiss) var dismiss
     @State private var showResetAlert = false
@@ -245,7 +246,7 @@ struct SettingsView: View {
     }
     
     private var patternSubtitle: String {
-        let count = LearnedPatternLibrary.shared.patterns.count
+        let count = patternLibrary.patterns.count
         if count == 0 {
             return "Nessun pattern salvato"
         } else if count == 1 {

@@ -153,42 +153,50 @@ struct SensorSettingsView: View {
     // MARK: - Sensor Status Row
     
     private var sensorStatusRow: some View {
-        HStack(spacing: 12) {
-            // Status indicator
-            ZStack {
-                Circle()
-                    .fill(bleManager.isConnected ? Color.green.opacity(0.2) : Color.gray.opacity(0.2))
-                    .frame(width: 40, height: 40)
-                
-                Circle()
-                    .fill(bleManager.isConnected ? Color.green : Color.gray)
-                    .frame(width: 12, height: 12)
+        VStack(alignment: .leading, spacing: 8) {
+            // Prima riga: Indicatore di stato + Nome del sensore + Icona di connessione
+            HStack(spacing: 12) {
+                // Indicatore di stato
+                ZStack {
+                    Circle()
+                        .fill(bleManager.isConnected ? Color.green.opacity(0.2) : Color.gray.opacity(0.2))
+                        .frame(width: 40, height: 40)
+
+                    Circle()
+                        .fill(bleManager.isConnected ? Color.green : Color.gray)
+                        .frame(width: 12, height: 12)
+                }
+
+                // Nome del sensore
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(bleManager.sensorName)
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+
+                    Text(bleManager.statusMessage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                // Icona di connessione (allineata a destra)
+                if bleManager.isConnected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(.green)
+                }
             }
-            
-            VStack(alignment: .leading, spacing: 4) {
-                Text(bleManager.sensorName)
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                
-                Text(bleManager.statusMessage)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            
-            Spacer()
+
+            // Seconda riga: Frequenza stimata (allineata a sinistra, sotto il nome)
             HStack {
                 Text("Frequenza stimata")
                 Spacer()
                 Text(formatSR(bleManager.sampleRateHz))
                     .foregroundStyle(.secondary)
             }
-            
-            if bleManager.isConnected {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-            }
         }
         .padding(.vertical, 4)
+
     }
 }
 
