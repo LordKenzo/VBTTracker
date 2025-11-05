@@ -2,7 +2,8 @@
 //  TrainingSessionView.swift
 //  VBTTracker
 //
-//  UI FINALE con layout: Reps+Target in alto, Zona in basso
+//  STEP 2.5: Smart pattern loading dalla libreria (no UserDefaults)
+//  ✅ AGGIUNTO: Salvataggio sessione a fine allenamento
 //
 
 import SwiftUI
@@ -11,6 +12,8 @@ struct TrainingSessionView: View {
     @ObservedObject var bleManager: BLEManager
     let targetZone: TrainingZone
     let targetReps: Int
+    let loadPercentage: Double?  // ✅ STEP 3: Pattern matching pesato
+    
     @ObservedObject var settings = SettingsManager.shared
 
     
@@ -19,6 +22,7 @@ struct TrainingSessionView: View {
     
     @State private var dataStreamTimer: Timer?
     @State private var showEndSessionAlert = false
+    @State private var showSaveSessionAlert = false
     
     @State private var showSummary = false
     @State private var sessionData: TrainingSessionData?
@@ -100,37 +104,82 @@ struct TrainingSessionView: View {
         )
         .onAppear {
             sessionManager.targetZone = targetZone
-            
-            // Carica pattern ROM
-            if let data = UserDefaults.standard.data(forKey: "learnedPattern"),
-               let pattern = try? JSONDecoder().decode(LearnedPattern.self, from: data) {
-                sessionManager.repDetector.learnedPattern = pattern
-                print("📂 Pattern ROM caricato: \(String(format: "%.0fcm", pattern.estimatedROM * 100))")
+            let fallbackHz = 1.0 / 0.02 // 50 Hz
+            sessionManager.setSampleRateHz(bleManager.sampleRateHz ?? fallbackHz)
+
+            // 🧠 Pattern loading: usa il matching pesato della libreria + applica al detector
+            Task { @MainActor in
+                let library = LearnedPatternLibrary.shared
+
+                // Se libreria vuota → default
+                guard !library.patterns.isEmpty else {
+                    sessionManager.repDetector.apply(pattern: .defaultPattern)
+                    print("🔧 Pattern di default (libreria vuota)")
+                    return
+                }
+
+                print("🔍 Ricerca pattern ottimale...")
+                if let load = loadPercentage {
+                    print("   • Carico target: \(Int(load))%")
+                }
+
+                // Puoi passare anche i pochi sample iniziali (ok se vuoto: il metodo gestisce il caso)
+                let seedSeq = sessionManager.getAccelerationSamples()
+
+                // MATCH PESATO: 70% feature, 30% vicinanza %carico
+                let matched = library.matchPatternWeighted(for: seedSeq, loadPercentage: loadPercentage)
+                    ?? library.patterns.first!  // fallback: più recente
+
+                let learned = LearnedPattern(from: matched)
+                sessionManager.repDetector.apply(pattern: learned)
+
+                print("🎯 Pattern attivo: \(matched.label)")
+                print("   • ROM≈\(String(format: "%.0f cm", learned.estimatedROM*100))")
+                print("   • thr≈\(String(format: "%.2f g", learned.dynamicMinAmplitude))  • dur≈\(String(format: "%.2f s", learned.avgConcentricDuration))")
             }
-            
+
+
             startDataStream()
-            
-            // ✅ AGGIUNGI: Avvia automaticamente la sessione
             sessionManager.startRecording()
         }
         .onDisappear {
             stopDataStream()
+            if sessionManager.isRecording {
+                sessionManager.stopRecording()
+            }
         }
         .alert("Terminare Sessione?", isPresented: $showEndSessionAlert) {
-            Button("Annulla", role: .cancel) { }
             Button("Termina", role: .destructive) {
-                // Crea session data PRIMA di stoppare
-                sessionData = sessionManager.createSessionData()
+                // ✅ Usa direttamente il factory method del modello
+                sessionData = TrainingSessionData.from(
+                    manager: sessionManager,
+                    targetZone: targetZone,
+                    velocityLossThreshold: SettingsManager.shared.velocityLossThreshold
+                )
                 sessionManager.stopRecording()
-                showSummary = true
+                showSaveSessionAlert = true
             }
         } message: {
             Text("Ripetizioni completate: \(sessionManager.repCount)/\(targetReps)")
+        }
+        .alert("Salvare Sessione?", isPresented: $showSaveSessionAlert) {
+            Button("Non Salvare", role: .cancel) {
+                showSummary = true
+            }
+            Button("Salva") {
+                saveSession()
+                showSummary = true
+            }
+        } message: {
+            Text("Vuoi salvare questa sessione nello storico degli allenamenti?")
         }
         .sheet(isPresented: $showSummary) {
             if let data = sessionData {
                 TrainingSummaryView(sessionData: data)
             }
+        }
+        .onReceive(bleManager.$sampleRateHz.compactMap { $0 }) { hz in
+            sessionManager.setSampleRateHz(hz)
         }
     }
     
@@ -223,80 +272,46 @@ struct TrainingSessionView: View {
         }
     }
     
-    // MARK: - 2. Velocità Card
+    // MARK: - 2. Compact Velocity Card
     
     private var compactVelocityCard: some View {
-        VStack(spacing: 8) {
-            HStack {
-                Text("VELOCITÀ")
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(.secondary)
-                
-                Spacer()
-            }
-            
-            HStack(spacing: 8) {
-                // Corrente
-                VStack(spacing: 4) {
-                    Text("Corrente")
-                        .font(.caption2)
+        VStack(spacing: 12) {
+            // Velocity + Zone
+            HStack(spacing: 16) {
+                // Velocità
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("VELOCITÀ")
+                        .font(.caption)
+                        .fontWeight(.semibold)
                         .foregroundStyle(.secondary)
                     
-                    Text(String(format: "%.2f", sessionManager.currentVelocity))
-                        .font(.title3)
-                        .fontWeight(.bold)
-                        .foregroundStyle(sessionManager.currentZone.color)
-                    
-                    Text("m/s")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
-                .background(sessionManager.currentZone.color.opacity(0.1))
-                .cornerRadius(8)
-                
-                // Picco
-                VStack(spacing: 4) {
-                    Text("Picco")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    
-                    Text(String(format: "%.2f", sessionManager.peakVelocity))
-                        .font(.title3)
-                        .fontWeight(.bold)
-                        .foregroundStyle(.purple)
-                    
-                    Text("m/s")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
-                .background(Color.purple.opacity(0.1))
-                .cornerRadius(8)
-                
-                // Media
-                if sessionManager.repCount > 0 {
-                    VStack(spacing: 4) {
-                        Text("Media")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        
-                        Text(String(format: "%.2f", sessionManager.meanVelocity))
-                            .font(.title3)
-                            .fontWeight(.bold)
-                            .foregroundStyle(.blue)
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        Text(String(format: "%.2f", sessionManager.currentVelocity))
+                            .font(.system(size: 36, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white)
                         
                         Text("m/s")
-                            .font(.caption2)
+                            .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                    .background(Color.blue.opacity(0.1))
-                    .cornerRadius(8)
+                }
+                
+                Spacer()
+                
+                // Zona corrente
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text("ZONA")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.secondary)
+                    
+                    Text(sessionManager.currentZone.rawValue)
+                        .font(.headline)
+                        .foregroundStyle(sessionManager.currentZone.color)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(sessionManager.currentZone.color.opacity(0.2))
+                        .cornerRadius(8)
                 }
             }
         }
@@ -306,30 +321,14 @@ struct TrainingSessionView: View {
         .shadow(radius: 2)
     }
     
-    // MARK: - 3. Grafico Card
+    // MARK: - 3. Compact Graph Card
     
     private var compactGraphCard: some View {
-        VStack(spacing: 8) {
-            HStack {
-                Text("SEGNALE ACCELERAZIONE")
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(.secondary)
-                
-                Spacer()
-                
-                // Indicatore REC
-                HStack(spacing: 4) {
-                    Circle()
-                        .fill(.red)
-                        .frame(width: 6, height: 6)
-                    
-                    Text("REC")
-                        .font(.caption2)
-                        .fontWeight(.bold)
-                        .foregroundStyle(.red)
-                }
-            }
+        VStack(alignment: .leading, spacing: 8) {
+            Text("ACCELERAZIONE")
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundStyle(.secondary)
             
             RealTimeAccelerationGraph(data: sessionManager.getAccelerationSamples())
                 .frame(height: 120)
@@ -340,31 +339,39 @@ struct TrainingSessionView: View {
         .shadow(radius: 2)
     }
     
-    // MARK: - 4. Feedback Ultima Rep Card
+    // MARK: - 4. Last Rep Feedback Card
     
     private var lastRepFeedbackCard: some View {
         HStack(spacing: 16) {
-            // Info Rep
-            VStack(alignment: .leading, spacing: 6) {
-                Text("ULTIMA RIPETIZIONE")
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(.secondary)
-                
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(String(format: "%.2f", sessionManager.lastRepPeakVelocity))
-                        .font(.system(size: 32, weight: .bold, design: .rounded))
-                        .foregroundStyle(.primary)
-                    
-                    Text("m/s")
+            // Info rep
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Image(systemName: "figure.strengthtraining.traditional")
+                        .foregroundStyle(.blue)
+                    Text("REP #\(sessionManager.repCount)")
                         .font(.headline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.primary)
                 }
                 
-                // Zona della rep
-                Text(getZoneForVelocity(sessionManager.lastRepPeakVelocity))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 16) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Velocità")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Text(String(format: "%.2f m/s", sessionManager.lastRepPeakVelocity))
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                    }
+                    
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Zona")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Text(getZoneForVelocity(sessionManager.lastRepPeakVelocity))
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                    }
+                }
             }
             
             Spacer()
@@ -488,49 +495,95 @@ struct TrainingSessionView: View {
     // MARK: - Data Stream
     
     private func startDataStream() {
-        dataStreamTimer = Timer.scheduledTimer(withTimeInterval: 0.02, repeats: true) { _ in
-            sessionManager.processSensorData(
-                acceleration: bleManager.acceleration,
-                angularVelocity: bleManager.angularVelocity,
-                angles: bleManager.angles,
-                isCalibrated: bleManager.isCalibrated
-            )
-            
-            // Check velocity loss
-            if settings.stopOnVelocityLoss &&
-               sessionManager.isRecording &&
-               sessionManager.velocityLoss >= settings.velocityLossThreshold {
-                sessionManager.stopRecording()
-            }
-            
-            // Auto-stop al raggiungimento target
-            /*
-            if sessionManager.isRecording &&
-               sessionManager.repCount >= self.targetReps {
-                sessionManager.stopRecording()
-                
-                // Vibrazione + feedback
-                let generator = UINotificationFeedbackGenerator()
-                generator.notificationOccurred(.success)
-            }
-             */
-            // Notifica visiva al raggiungimento target
-            if sessionManager.isRecording &&
-               sessionManager.repCount == self.targetReps {
-                
-                // Haptic feedback
-                let generator = UINotificationFeedbackGenerator()
-                generator.notificationOccurred(.success)
-                
-                // Voice feedback opzionale
-                // voiceFeedback.announce("Target raggiunto")
+        // chiudi eventuale timer precedente
+        stopDataStream()
+
+        func startTimer(with hz: Double) {
+            let sr = max(5.0, min(hz, 200.0))         // clamp di sicurezza
+            let interval = 1.0 / sr
+            dataStreamTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
+                sessionManager.processSensorData(
+                    acceleration: bleManager.acceleration,
+                    angularVelocity: bleManager.angularVelocity,
+                    angles: bleManager.angles,
+                    isCalibrated: bleManager.isCalibrated
+                )
+
+                if settings.stopOnVelocityLoss &&
+                   sessionManager.isRecording &&
+                   sessionManager.velocityLoss >= settings.velocityLossThreshold {
+                    sessionManager.stopRecording()
+                }
+
+                if sessionManager.isRecording &&
+                   sessionManager.repCount == self.targetReps {
+                    let generator = UINotificationFeedbackGenerator()
+                    generator.notificationOccurred(.success)
+                }
             }
         }
+
+        // avvio iniziale con fallback
+        let fallbackHz = 50.0
+        startTimer(with: bleManager.sampleRateHz ?? fallbackHz)
+
+        // se cambia la SR del BLE, ri-crea il timer con il nuovo passo
+        NotificationCenter.default.addObserver(forName: NSNotification.Name("BLE_SR_UPDATED"), object: nil, queue: .main) { _ in
+            stopDataStream()
+            startTimer(with: bleManager.sampleRateHz ?? fallbackHz)
+        }
     }
+
     
     private func stopDataStream() {
         dataStreamTimer?.invalidate()
         dataStreamTimer = nil
+    }
+    
+    // MARK: - Save Session
+    
+    private func saveSession() {
+        // Calcola le medie reali
+        let meanMPV = sessionManager.averageMPV()
+        let meanPPV = sessionManager.averagePPV()
+
+
+        
+        guard let data = sessionData else { return }
+        
+        // 1. Salva sessione nello storico
+        let session = TrainingSession.from(data, targetReps: targetReps)
+        TrainingHistoryManager.shared.saveSession(session)
+        print("💾 Sessione salvata nello storico")
+        
+        // 2. ✅ STEP 3: Salva pattern se sessione completata con successo
+        if data.wasSuccessful && data.totalReps >= 3 {
+            let exerciseName = "Panca Piana"  // Per ora hardcoded
+            
+            // Salva pattern con informazioni complete
+            sessionManager.repDetector.savePatternSequence(
+                label: exerciseName,
+                repCount: data.totalReps,
+                loadPercentage: loadPercentage,
+                avgMPV: meanMPV,
+                avgPPV: meanPPV
+            )
+            
+            print("🧠 Pattern salvato in libreria:")
+            print("   • Esercizio: \(exerciseName)")
+            print("   • Reps: \(data.totalReps)")
+            if let load = loadPercentage {
+                print("   • Carico: \(Int(load))%")
+            }
+            if !data.reps.isEmpty {
+                let meanMPV = data.reps.map(\.meanVelocity).reduce(0, +) / Double(data.reps.count)
+                print("   • MPV medio: \(String(format: "%.3f", meanMPV)) m/s")
+            } else {
+                print("   • MPV medio: N/D (nessuna ripetizione registrata)")
+            }
+        } else {
+            print("⚠️ Pattern non salvato (sessione non completata o <3 reps)")
+        }
     }
 }
 
@@ -588,7 +641,8 @@ struct RepToastView: View {
         TrainingSessionView(
             bleManager: BLEManager(),
             targetZone: .strength,
-            targetReps: 5
+            targetReps: 5,
+            loadPercentage: 70
         )
     }
 }

@@ -3,24 +3,88 @@
 //  VBTTracker
 //
 //  Hub principale impostazioni - Architettura modulare
+//  ✅ AGGIORNATO con @ObservedObject per patternLibrary
 //
 
 import SwiftUI
+
+// MARK: - Detection Algorithm Enum
+enum RepDetectionAlgorithm: String, CaseIterable, Identifiable {
+    case zAxisSimple = "Asse Z (Semplice)"
+    
+    var id: String { self.rawValue }
+    
+    var description: String {
+        switch self {
+        case .zAxisSimple:
+            return "Pattern picco-valle-picco su asse verticale"
+        }
+    }
+}
 
 struct SettingsView: View {
     @ObservedObject var bleManager: BLEManager
     @ObservedObject var calibrationManager: CalibrationManager
     @ObservedObject var settings = SettingsManager.shared
+    @ObservedObject private var patternLibrary = LearnedPatternLibrary.shared
+    
+    // ✅ CORREZIONE: @ObservedObject per aggiornamento real-time
+    @ObservedObject private var patternLibrary = LearnedPatternLibrary.shared
     
     @Environment(\.dismiss) var dismiss
     @State private var showResetAlert = false
     
+    @AppStorage("selectedDetectionAlgorithm") private var selectedAlgorithmRaw = RepDetectionAlgorithm.zAxisSimple.rawValue
+    
+    private var selectedAlgorithm: RepDetectionAlgorithm {
+        get {
+            RepDetectionAlgorithm(rawValue: selectedAlgorithmRaw) ?? .zAxisSimple
+        }
+        nonmutating set {
+            selectedAlgorithmRaw = newValue.rawValue
+        }
+    }
+
     var body: some View {
         NavigationStack {
             List {
+                // MARK: - Detection Algorithm Section
+                Section {
+                    Picker("Algoritmo", selection: Binding(
+                        get: { selectedAlgorithm },
+                        set: { newValue in
+                            selectedAlgorithm = newValue
+                            NotificationCenter.default.post(
+                                name: .detectionAlgorithmChanged,
+                                object: newValue.rawValue
+                            )
+                        }
+                    )) {
+                        ForEach(RepDetectionAlgorithm.allCases) { algorithm in
+                            Text(algorithm.rawValue).tag(algorithm)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "info.circle")
+                            .foregroundStyle(.secondary)
+                            .font(.caption)
+                        
+                        Text(selectedAlgorithm.description)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 4)
+                    
+                } header: {
+                    Text("Algoritmo Detection")
+                } footer: {
+                    Text("L'algoritmo Asse Z utilizza un pattern semplice basato su picchi e valli dell'accelerazione verticale. Ottimizzato per movimenti balistici come panca, squat e stacchi.")
+                }
+                
                 // MARK: - Categories Section
                 Section {
-                    // Sensore
                     NavigationLink(destination: SensorSettingsView(
                         bleManager: bleManager,
                         calibrationManager: calibrationManager
@@ -33,7 +97,25 @@ struct SettingsView: View {
                         )
                     }
                     
-                    // Velocità
+                    NavigationLink(destination: LearnedPatternsView()) {
+                        NavigationSettingRow(
+                            title: "Pattern Appresi",
+                            subtitle: patternSubtitle,
+                            icon: "brain.head.profile",
+                            iconColor: .purple
+                        )
+                    }
+                    
+                    NavigationLink(destination: RecordPatternView(bleManager: bleManager)) {
+                        NavigationSettingRow(
+                            title: "Registra Pattern",
+                            subtitle: "Registra manualmente un nuovo pattern",
+                            icon: "waveform.badge.plus",
+                            iconColor: .red,
+                            badge: "Nuovo"
+                        )
+                    }
+                    
                     NavigationLink(destination: VelocitySettingsView()) {
                         NavigationSettingRow(
                             title: "Velocità",
@@ -43,7 +125,6 @@ struct SettingsView: View {
                         )
                     }
                     
-                    // Rilevamento Rep (Avanzato)
                     NavigationLink(destination: RepDetectionSettingsView()) {
                         NavigationSettingRow(
                             title: "Rilevamento Rep",
@@ -54,7 +135,6 @@ struct SettingsView: View {
                         )
                     }
                     
-                    // Audio
                     NavigationLink(destination: AudioSettingsView()) {
                         NavigationSettingRow(
                             title: "Audio",
@@ -71,13 +151,13 @@ struct SettingsView: View {
                 Section {
                     InfoSettingRow(
                         title: "Versione",
-                        value: "1.0.0",
+                        value: "1.1.0",
                         icon: "info.circle"
                     )
                     
                     InfoSettingRow(
                         title: "Build",
-                        value: "2024.10.19",
+                        value: "2024.11.02",
                         icon: "hammer"
                     )
                     
@@ -134,7 +214,7 @@ struct SettingsView: View {
     
     private var sensorSubtitle: String {
         if bleManager.isConnected {
-            return "\(bleManager.sensorName) • Connesso"
+            return "\(bleManager.sensorName) Connesso"
         } else {
             return "Nessun sensore connesso"
         }
@@ -143,13 +223,31 @@ struct SettingsView: View {
     private var audioSubtitle: String {
         if settings.voiceFeedbackEnabled {
             let language = settings.voiceLanguage == "it-IT" ? "Italiano" : "English"
-            return "Attivo • \(language)"
+            return "Attivo \(language)"
         } else {
             return "Disattivato"
         }
     }
+    
+    // ✅ CORREZIONE: Ora si aggiorna in tempo reale
+    private var patternSubtitle: String {
+        let count = patternLibrary.patterns.count
+        if count == 0 {
+            return "Nessun pattern salvato"
+        } else if count == 1 {
+            return "1 pattern salvato"
+        } else {
+            return "\(count) pattern salvati"
+        }
+    }
 }
 
+// MARK: - NotificationCenter Extension
+extension Notification.Name {
+    static let detectionAlgorithmChanged = Notification.Name("detectionAlgorithmChanged")
+}
+
+// MARK: - Previews
 #Preview("Connected") {
     let bleManager = BLEManager()
     bleManager.isConnected = true

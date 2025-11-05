@@ -13,6 +13,10 @@ class SettingsManager: ObservableObject {
     static let shared = SettingsManager()
     
     // MARK: - Published Properties
+    @Published var repLookAheadMs: Double {
+        didSet { save() }
+    }
+
     @Published var velocityMeasurementMode: VBTRepDetector.VelocityMeasurementMode {
         didSet { save() }
     }
@@ -93,6 +97,16 @@ class SettingsManager: ObservableObject {
         didSet { save() }
     }
     
+    // MARK: - Ultimo sensore
+    @Published var lastConnectedPeripheralID: String? {
+        didSet { save() }
+    }
+
+    private func loadLastPeripheralID() {
+        lastConnectedPeripheralID = UserDefaults.standard.string(forKey: Keys.lastPeripheralID)
+    }
+    
+    
     // MARK: - UserDefaults Keys
     
     private enum Keys {
@@ -115,7 +129,8 @@ class SettingsManager: ObservableObject {
         static let repMinAmplitude = "repMinAmplitude"
         static let repSmoothingWindow = "repSmoothingWindow"
         static let repEccentricThreshold = "repEccentricThreshold"
-
+        static let repLookAheadMs = "repLookAheadMs"
+        static let lastPeripheralID = "lastPeripheralID"
     }
     
     // MARK: - Initialization
@@ -139,7 +154,8 @@ class SettingsManager: ObservableObject {
         let loadedMinAccel = UserDefaults.standard.double(forKey: Keys.repMinAcceleration)
         let loadedEccentricThreshold = UserDefaults.standard.double(forKey: Keys.repEccentricThreshold)
            repEccentricThreshold = loadedEccentricThreshold == 0 ? 0.15 : loadedEccentricThreshold  // Default 0.15g
-          
+        
+        
 
         repMinVelocity = loadedMinVel == 0 ? 0.10 : loadedMinVel
         repMinPeakVelocity = loadedMinPeak == 0 ? 0.15 : loadedMinPeak
@@ -168,9 +184,15 @@ class SettingsManager: ObservableObject {
         
         let loadedWindow = UserDefaults.standard.integer(forKey: Keys.repSmoothingWindow)
         repSmoothingWindow = loadedWindow == 0 ? 10 : loadedWindow  // Default 10
-
+        
+        let loadedLookAhead = UserDefaults.standard.double(forKey: Keys.repLookAheadMs)
+        repLookAheadMs = loadedLookAhead == 0 ? 200.0 : loadedLookAhead
+        
         let loadedVelocityMode = UserDefaults.standard.string(forKey: Keys.velocityMode) ?? "concentricOnly"
            velocityMeasurementMode = loadedVelocityMode == "fullROM" ? .fullROM : .concentricOnly
+        
+        loadLastPeripheralID()
+
            
         print("✅ SettingsManager inizializzato")
     }
@@ -208,10 +230,13 @@ class SettingsManager: ObservableObject {
         UserDefaults.standard.set(repMinAmplitude, forKey: Keys.repMinAmplitude)
         UserDefaults.standard.set(repSmoothingWindow, forKey: Keys.repSmoothingWindow)
         UserDefaults.standard.set(repEccentricThreshold, forKey: Keys.repEccentricThreshold)
+        UserDefaults.standard.set(repLookAheadMs, forKey: Keys.repLookAheadMs)
 
+        UserDefaults.standard.set(lastConnectedPeripheralID, forKey: Keys.lastPeripheralID)
         
         let modeString = velocityMeasurementMode == .fullROM ? "fullROM" : "concentricOnly"
           UserDefaults.standard.set(modeString, forKey: Keys.velocityMode)
+        
     }
     
     private static func loadVelocityRanges() -> VelocityRanges {
@@ -257,7 +282,7 @@ class SettingsManager: ObservableObject {
         voiceLanguage = "it-IT"
         velocityMeasurementMode = .concentricOnly
         repMinTimeBetween = 0.8
-        repMinDuration = 0.3
+        repMinDuration = 0.45
         repMinAmplitude = 0.45
         repSmoothingWindow = 10
         repEccentricThreshold = 0.15
@@ -384,4 +409,5 @@ enum TrainingZone: String, CaseIterable {
         case .maxSpeed: return ">1.00 m/s - Velocità massima"
         }
     }
+    
 }
