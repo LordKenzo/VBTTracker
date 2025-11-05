@@ -23,7 +23,7 @@ enum RepDetectionAlgorithm: String, CaseIterable, Identifiable {
 }
 
 struct SettingsView: View {
-    @ObservedObject var bleManager: BLEManager
+    @ObservedObject var sensorManager: UnifiedSensorManager
     @ObservedObject var calibrationManager: CalibrationManager
     @ObservedObject var settings = SettingsManager.shared
     
@@ -85,17 +85,17 @@ struct SettingsView: View {
                 // MARK: - Categories Section
                 Section {
                     NavigationLink(destination: SensorSettingsView(
-                        bleManager: bleManager,
+                        sensorManager: sensorManager,
                         calibrationManager: calibrationManager
                     )) {
                         NavigationSettingRow(
                             title: "Sensore",
                             subtitle: sensorSubtitle,
                             icon: "sensor.fill",
-                            iconColor: bleManager.isConnected ? .green : .gray
+                            iconColor: sensorManager.isConnected ? .green : .gray
                         )
                     }
-                    
+
                     NavigationLink(destination: LearnedPatternsView()) {
                         NavigationSettingRow(
                             title: "Pattern Appresi",
@@ -104,8 +104,8 @@ struct SettingsView: View {
                             iconColor: .purple
                         )
                     }
-                    
-                    NavigationLink(destination: RecordPatternView(bleManager: bleManager)) {
+
+                    NavigationLink(destination: RecordPatternView(sensorManager: sensorManager)) {
                         NavigationSettingRow(
                             title: "Registra Pattern",
                             subtitle: "Registra manualmente un nuovo pattern",
@@ -210,10 +210,10 @@ struct SettingsView: View {
     }
     
     // MARK: - Computed Properties
-    
+
     private var sensorSubtitle: String {
-        if bleManager.isConnected {
-            return "\(bleManager.sensorName) Connesso"
+        if sensorManager.isConnected {
+            return "\(sensorManager.sensorName) Connesso"
         } else {
             return "Nessun sensore connesso"
         }
@@ -248,19 +248,15 @@ extension Notification.Name {
 
 // MARK: - Previews
 #Preview("Connected") {
-    let bleManager = BLEManager()
-    bleManager.isConnected = true
-    bleManager.sensorName = "WT901BLE67"
-    
-    return SettingsView(
-        bleManager: bleManager,
+    SettingsView(
+        sensorManager: UnifiedSensorManager(),
         calibrationManager: CalibrationManager()
     )
 }
 
 #Preview("Disconnected") {
     SettingsView(
-        bleManager: BLEManager(),
+        sensorManager: UnifiedSensorManager(),
         calibrationManager: CalibrationManager()
     )
 }

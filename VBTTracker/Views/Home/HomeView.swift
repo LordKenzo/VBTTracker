@@ -8,9 +8,9 @@
 import SwiftUI
 
 struct HomeView: View {
-    @StateObject private var bleManager = BLEManager()
+    @StateObject private var sensorManager = UnifiedSensorManager()
     @StateObject private var calibrationManager = CalibrationManager()
-    
+
     @State private var showSettings = false
     @State private var showHistory = false
     @State private var showConnectionView = false
@@ -62,7 +62,7 @@ struct HomeView: View {
                     VStack(spacing: 16) {
                         // Start Training Button
                         NavigationLink(destination: TrainingSelectionView(
-                            bleManager: bleManager
+                            sensorManager: sensorManager
                         )) {
                             Label("Inizia Allenamento", systemImage: "play.circle.fill")
                                 .font(.headline)
@@ -70,7 +70,7 @@ struct HomeView: View {
                                 .frame(height: 56)
                         }
                         .buttonStyle(.borderedProminent)
-                        .disabled(!bleManager.isConnected || !bleManager.isCalibrated)
+                        .disabled(!sensorManager.isConnected || !sensorManager.isCalibrated)
                         
                         // Connect Sensor Button (if not connected)
                         /*if !bleManager.isConnected {
@@ -112,7 +112,7 @@ struct HomeView: View {
             }
             .sheet(isPresented: $showSettings) {
                 SettingsView(
-                    bleManager: bleManager,
+                    sensorManager: sensorManager,
                     calibrationManager: calibrationManager
                 )
             }
@@ -122,7 +122,7 @@ struct HomeView: View {
             .sheet(isPresented: $showConnectionView) {
                 NavigationStack {
                     SensorSettingsView(
-                        bleManager: bleManager,
+                        sensorManager: sensorManager,
                         calibrationManager: calibrationManager
                     )
                 }
@@ -139,18 +139,18 @@ struct HomeView: View {
                 StatusIndicator(
                     icon: "sensor.fill",
                     label: "Sensore",
-                    isActive: bleManager.isConnected,
-                    activeText: bleManager.sensorName,
+                    isActive: sensorManager.isConnected,
+                    activeText: sensorManager.sensorName,
                     inactiveText: "Non connesso"
                 )
-                
-                // Calibration Status
+
+                // Calibration Status (solo per WitMotion)
                 StatusIndicator(
                     icon: "scope",
                     label: "Calibrazione",
-                    isActive: bleManager.isCalibrated,
-                    activeText: "Calibrato",
-                    inactiveText: "Non calibrato"
+                    isActive: sensorManager.isCalibrated,
+                    activeText: sensorManager.currentSensorType == .witmotion ? "Calibrato" : "Non richiesta",
+                    inactiveText: sensorManager.currentSensorType == .witmotion ? "Non calibrato" : "Non richiesta"
                 )
             }
         }

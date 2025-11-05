@@ -9,16 +9,30 @@
 import SwiftUI
 
 struct SensorSettingsView: View {
-    @ObservedObject var bleManager: BLEManager
+    @ObservedObject var sensorManager: UnifiedSensorManager
     @ObservedObject var calibrationManager: CalibrationManager
     @ObservedObject var settings = SettingsManager.shared
-    
+
     @Environment(\.dismiss) var dismiss
     @State private var showCalibrationView = false
     @State private var showSensorScan = false
-    
+
     // ✅ NUOVO: Toggle per dati real-time
     @State private var showRealTimeData = false
+
+    // Helper per accedere al manager corrente
+    private var currentManager: Any {
+        switch settings.selectedSensorType {
+        case .witmotion:
+            return sensorManager.bleManager
+        case .arduino:
+            return sensorManager.arduinoManager
+        }
+    }
+
+    private var isConnected: Bool {
+        sensorManager.isConnected
+    }
     
     var body: some View {
         List {
@@ -48,9 +62,9 @@ struct SensorSettingsView: View {
             // MARK: - Sensor Status Section
             Section {
                 sensorStatusRow
-                
-                if bleManager.isConnected {
-                    Button(action: { bleManager.disconnect() }) {
+
+                if isConnected {
+                    Button(action: { sensorManager.disconnect() }) {
                         Label("Disconnetti", systemImage: "xmark.circle.fill")
                             .foregroundStyle(.red)
                     }
@@ -63,17 +77,17 @@ struct SensorSettingsView: View {
                 Text("Connessione")
             }
             
-            // MARK: - Calibration Section
-            if bleManager.isConnected {
+            // MARK: - Calibration Section (solo WitMotion)
+            if isConnected && settings.selectedSensorType == .witmotion {
                 Section {
                     // Pulsante Calibrazione
                     Button(action: { showCalibrationView = true }) {
                         HStack {
                             Label("Calibrazione Sensore", systemImage: "sensor.tag.radiowaves.forward.fill")
-                            
+
                             Spacer()
-                            
-                            if bleManager.isCalibrated {
+
+                            if sensorManager.bleManager.isCalibrated {
                                 Image(systemName: "checkmark.circle.fill")
                                     .foregroundStyle(.green)
                             } else {
@@ -82,7 +96,7 @@ struct SensorSettingsView: View {
                             }
                         }
                     }
-                    
+
                     // Dettagli calibrazione
                     if let calibration = settings.savedCalibration {
                         VStack(alignment: .leading, spacing: 8) {
@@ -91,24 +105,24 @@ struct SensorSettingsView: View {
                                 value: String(format: "%.3f g", calibration.accelerationOffset[0]),
                                 icon: "arrow.left.and.right"
                             )
-                            
+
                             InfoSettingRow(
                                 title: "Offset Y",
                                 value: String(format: "%.3f g", calibration.accelerationOffset[1]),
                                 icon: "arrow.up.and.down"
                             )
-                            
+
                             InfoSettingRow(
                                 title: "Offset Z",
                                 value: String(format: "%.3f g", calibration.accelerationOffset[2]),
                                 icon: "arrow.forward.to.line"
                             )
-                            
+
                             HStack {
                                 Image(systemName: "clock")
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
-                                
+
                                 Text("Data: \(calibration.timestamp, style: .date) alle \(calibration.timestamp, style: .time)")
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
@@ -116,10 +130,10 @@ struct SensorSettingsView: View {
                             .padding(.top, 4)
                         }
                         .padding(.vertical, 4)
-                        
+
                         // ✅ NUOVO: Pulsante Rimuovi Calibrazione
                         Button(action: {
-                            bleManager.removeCalibration()
+                            sensorManager.bleManager.removeCalibration()
                             calibrationManager.resetCalibration()
                         }) {
                             HStack {
@@ -138,7 +152,7 @@ struct SensorSettingsView: View {
             }
             
             // MARK: - Sensor Info Section
-            if bleManager.isConnected {
+            if isConnected {
                 Section {
                     HStack {
                         Image(systemName: "sensor.fill")
@@ -146,43 +160,68 @@ struct SensorSettingsView: View {
                             .frame(width: 24)
                         Text("Nome")
                         Spacer()
-                        Text(bleManager.sensorName)
+                        Text(sensorManager.sensorName)
                             .foregroundStyle(.secondary)
                     }
-                    
+
                     HStack {
                         Image(systemName: "waveform.path")
                             .foregroundStyle(.blue)
                             .frame(width: 24)
                         Text("Frequenza stimata")
                         Spacer()
-                        Text(formatSR(bleManager.sampleRateHz))
+                        Text(formatSR(sensorManager.sampleRateHz))
                             .foregroundStyle(.secondary)
                     }
-                    
-                    // Pulsante Config 200Hz
-                    Button {
-                        bleManager.configureFor200Hz()
-                    } label: {
+
+                    // Pulsante Config 200Hz (solo WitMotion)
+                    if settings.selectedSensorType == .witmotion {
+                        Button {
+                            sensorManager.bleManager.configureFor200Hz()
+                        } label: {
+                            HStack {
+                                Image(systemName: "speedometer")
+                                    .foregroundStyle(.blue)
+                                Text("Imposta 200 Hz")
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.caption)
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+
                         HStack {
-                            Image(systemName: "speedometer")
+                            Image(systemName: "gauge.high")
                                 .foregroundStyle(.blue)
-                            Text("Imposta 200 Hz")
+                                .frame(width: 24)
+                            Text("Range")
                             Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.caption)
-                                .foregroundStyle(.tertiary)
+                            Text("±16g")
+                                .foregroundStyle(.secondary)
                         }
                     }
-                    
-                    HStack {
-                        Image(systemName: "gauge.high")
-                            .foregroundStyle(.blue)
-                            .frame(width: 24)
-                        Text("Range")
-                        Spacer()
-                        Text("±16g")
-                            .foregroundStyle(.secondary)
+
+                    // Info Arduino
+                    if settings.selectedSensorType == .arduino {
+                        HStack {
+                            Image(systemName: "ruler")
+                                .foregroundStyle(.blue)
+                                .frame(width: 24)
+                            Text("Distanza Attuale")
+                            Spacer()
+                            Text(String(format: "%.0f mm", sensorManager.arduinoManager.distance))
+                                .foregroundStyle(.secondary)
+                        }
+
+                        HStack {
+                            Image(systemName: "gauge.high")
+                                .foregroundStyle(.blue)
+                                .frame(width: 24)
+                            Text("Range")
+                            Spacer()
+                            Text("30-2000 mm")
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 } header: {
                     Text("Informazioni Sensore")
@@ -190,13 +229,17 @@ struct SensorSettingsView: View {
             }
             
             // MARK: - ✅ NUOVO: Real-Time Data Section (Debug)
-            if bleManager.isConnected {
+            if isConnected {
                 Section {
                     Toggle("Mostra Dati Real-time", isOn: $showRealTimeData)
                         .tint(.blue)
-                    
+
                     if showRealTimeData {
-                        dataDisplaySection
+                        if settings.selectedSensorType == .witmotion {
+                            dataDisplaySectionWitMotion
+                        } else {
+                            dataDisplaySectionArduino
+                        }
                     }
                 } header: {
                     Text("Debug")
@@ -210,18 +253,18 @@ struct SensorSettingsView: View {
         .sheet(isPresented: $showCalibrationView) {
             CalibrationView(
                 calibrationManager: calibrationManager,
-                sensorManager: bleManager
+                sensorManager: sensorManager.bleManager
             )
             .onDisappear {
                 if let calibration = calibrationManager.currentCalibration {
                     settings.savedCalibration = calibration
-                    bleManager.applyCalibration(calibration)
+                    sensorManager.bleManager.applyCalibration(calibration)
                 }
             }
         }
         .sheet(isPresented: $showSensorScan) {
             NavigationStack {
-                SensorScanView(bleManager: bleManager)
+                SensorScanView(sensorManager: sensorManager)
             }
         }
     }
@@ -243,21 +286,21 @@ struct SensorSettingsView: View {
                 // Indicatore di stato
                 ZStack {
                     Circle()
-                        .fill(bleManager.isConnected ? Color.green.opacity(0.2) : Color.gray.opacity(0.2))
+                        .fill(isConnected ? Color.green.opacity(0.2) : Color.gray.opacity(0.2))
                         .frame(width: 40, height: 40)
 
                     Circle()
-                        .fill(bleManager.isConnected ? Color.green : Color.gray)
+                        .fill(isConnected ? Color.green : Color.gray)
                         .frame(width: 12, height: 12)
                 }
 
                 // Nome del sensore
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(bleManager.sensorName)
+                    Text(sensorManager.sensorName)
                         .font(.subheadline)
                         .fontWeight(.medium)
 
-                    Text(bleManager.statusMessage)
+                    Text(sensorManager.statusMessage)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -265,7 +308,7 @@ struct SensorSettingsView: View {
                 Spacer()
 
                 // Icona di connessione
-                if bleManager.isConnected {
+                if isConnected {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundColor(.green)
                 }
@@ -274,36 +317,94 @@ struct SensorSettingsView: View {
         .padding(.vertical, 4)
     }
     
-    // MARK: - ✅ NUOVO: Real-Time Data Display Section
-    
-    private var dataDisplaySection: some View {
+    // MARK: - ✅ NUOVO: Real-Time Data Display Sections
+
+    private var dataDisplaySectionWitMotion: some View {
         VStack(spacing: 16) {
             // Accelerazione
             dataRow(
                 title: "Accelerazione (g)",
-                values: bleManager.acceleration,
+                values: sensorManager.bleManager.acceleration,
                 colors: [.red, .green, .blue]
             )
-            
+
             Divider()
-            
+
             // Velocità Angolare
             dataRow(
                 title: "Velocità Angolare (°/s)",
-                values: bleManager.angularVelocity,
+                values: sensorManager.bleManager.angularVelocity,
                 colors: [.red, .green, .blue]
             )
-            
+
             Divider()
-            
+
             // Angoli
             dataRow(
                 title: "Angoli (°)",
-                values: bleManager.angles,
+                values: sensorManager.bleManager.angles,
                 colors: [.red, .green, .blue]
             )
         }
         .padding(.vertical, 8)
+    }
+
+    private var dataDisplaySectionArduino: some View {
+        VStack(spacing: 16) {
+            // Distanza
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Distanza (mm)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Text(String(format: "%.1f", sensorManager.arduinoManager.distance))
+                    .font(.system(.title, design: .monospaced))
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.blue)
+            }
+
+            Divider()
+
+            // Stato Movimento
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Stato Movimento")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                HStack {
+                    Circle()
+                        .fill(stateColor(sensorManager.arduinoManager.movementState))
+                        .frame(width: 12, height: 12)
+
+                    Text(sensorManager.arduinoManager.movementState.displayName)
+                        .font(.system(.body, design: .monospaced))
+                        .fontWeight(.semibold)
+                }
+            }
+
+            Divider()
+
+            // Timestamp
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Timestamp (ms)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Text(String(format: "%d", sensorManager.arduinoManager.timestamp))
+                    .font(.system(.body, design: .monospaced))
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 8)
+    }
+
+    private func stateColor(_ state: MovementState) -> Color {
+        switch state {
+        case .approaching: return .red
+        case .receding: return .blue
+        case .idle: return .gray
+        }
     }
     
     // MARK: - ✅ NUOVO: Data Row Component
@@ -341,20 +442,19 @@ struct SensorSettingsView: View {
 
 // MARK: - Preview
 
-#Preview("Connected & Calibrated") {
+#Preview("WitMotion Connected") {
     NavigationStack {
         SensorSettingsView(
-            bleManager: {
-                let manager = BLEManager()
-                manager.isConnected = true
-                manager.isCalibrated = true
-                manager.sensorName = "WT901BLE67"
-                manager.sampleRateHz = 200.0
-                manager.acceleration = [0.02, -0.05, 1.00]
-                manager.angularVelocity = [1.2, -0.8, 0.3]
-                manager.angles = [2.5, -1.2, 0.0]
-                return manager
-            }(),
+            sensorManager: UnifiedSensorManager(),
+            calibrationManager: CalibrationManager()
+        )
+    }
+}
+
+#Preview("Arduino Connected") {
+    NavigationStack {
+        SensorSettingsView(
+            sensorManager: UnifiedSensorManager(),
             calibrationManager: CalibrationManager()
         )
     }
@@ -363,22 +463,7 @@ struct SensorSettingsView: View {
 #Preview("Disconnected") {
     NavigationStack {
         SensorSettingsView(
-            bleManager: BLEManager(),
-            calibrationManager: CalibrationManager()
-        )
-    }
-}
-
-#Preview("Connected - Not Calibrated") {
-    NavigationStack {
-        SensorSettingsView(
-            bleManager: {
-                let manager = BLEManager()
-                manager.isConnected = true
-                manager.isCalibrated = false
-                manager.sensorName = "WT901BLE67"
-                return manager
-            }(),
+            sensorManager: UnifiedSensorManager(),
             calibrationManager: CalibrationManager()
         )
     }
