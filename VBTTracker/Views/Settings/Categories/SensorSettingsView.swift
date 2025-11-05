@@ -290,24 +290,30 @@ struct SensorSettingsView: View {
             Text(title)
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            
+
             HStack(spacing: 20) {
-                ForEach(0..<3) { index in
+                // Assi fissi: X, Y, Z
+                let axes = ["X", "Y", "Z"]
+                ForEach(0..<3, id: \.self) { index in
                     VStack(spacing: 4) {
-                        Text(["X", "Y", "Z"][index])
+                        // Nome dell'asse (sempre presente)
+                        Text(axes[index])
                             .font(.caption2)
                             .foregroundStyle(.secondary)
-                        
-                        Text(String(format: "%.2f", values[index]))
+
+                        // Valore con fallback a 0.0 se l'indice non esiste
+                        let value = index < values.count ? values[index] : 0.0
+                        Text(String(format: "%.2f", value))
                             .font(.system(.body, design: .monospaced))
                             .fontWeight(.semibold)
-                            .foregroundStyle(colors[index])
+                            .foregroundStyle(index < colors.count ? colors[index] : .primary)
                     }
                     .frame(maxWidth: .infinity)
                 }
             }
         }
     }
+
 }
 
 // MARK: - Preview

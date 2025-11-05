@@ -183,6 +183,7 @@ class TrainingSessionManager: ObservableObject {
         guard isRecording else { return }
         
         // 1) Ottieni accelerazione Z (verticale) e togli la gravità (coerente con il detector)
+        guard acceleration.count >= 3 else { return }
         let accZ = acceleration[2]
         let accZNoGravity = accZ   // se Z è verso l’alto; inverti segno se necessario
 
