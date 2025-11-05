@@ -404,12 +404,33 @@ final class VBTRepDetector {
         var mpv = vConc.reduce(0, +) / Double(vConc.count)
         var ppv = vConc.max() ?? 0
 
-        // Applica correzione velocità se abilitata
+        // Applica correzione velocità se abilitata E se SR è basso
+        // La correzione compensa la sottostima a SR bassi (~25Hz)
         if SettingsManager.shared.enableVelocityCorrection {
             let profile = SettingsManager.shared.detectionProfile
-            let correctionFactor = profile.velocityCorrectionFactor
-            mpv *= correctionFactor
-            ppv *= correctionFactor
+            let targetFactor = profile.velocityCorrectionFactor
+
+            // Interpolazione progressiva: correzione piena a 25Hz, nulla a 60Hz
+            let minSR = 25.0  // SR minimo con correzione massima
+            let maxSR = 60.0  // SR ideale senza correzione
+
+            let actualFactor: Double
+            if sampleRateHz >= maxSR {
+                // SR alto: nessuna correzione necessaria
+                actualFactor = 1.0
+            } else if sampleRateHz <= minSR {
+                // SR molto basso: correzione massima
+                actualFactor = targetFactor
+            } else {
+                // SR intermedio: interpolazione lineare
+                // t = 0.0 a minSR (correzione piena)
+                // t = 1.0 a maxSR (nessuna correzione)
+                let t = (sampleRateHz - minSR) / (maxSR - minSR)
+                actualFactor = targetFactor + (1.0 - targetFactor) * t
+            }
+
+            mpv *= actualFactor
+            ppv *= actualFactor
         }
 
         // 6) Spostamento durante la fase concentrica: integra v
@@ -563,8 +584,22 @@ extension VBTRepDetector {
         print("")
         print("🎯 PROFILO: \(SettingsManager.shared.detectionProfile.displayName)")
         if SettingsManager.shared.enableVelocityCorrection {
-            let factor = SettingsManager.shared.detectionProfile.velocityCorrectionFactor
-            print("   • Correzione Velocità: ON (×\(String(format: "%.1f", factor)))")
+            let targetFactor = SettingsManager.shared.detectionProfile.velocityCorrectionFactor
+
+            // Calcola fattore effettivo basato su SR (stessa logica di calculatePropulsiveVelocitiesAndDisplacement)
+            let minSR = 25.0
+            let maxSR = 60.0
+            let actualFactor: Double
+            if sampleRateHz >= maxSR {
+                actualFactor = 1.0
+            } else if sampleRateHz <= minSR {
+                actualFactor = targetFactor
+            } else {
+                let t = (sampleRateHz - minSR) / (maxSR - minSR)
+                actualFactor = targetFactor + (1.0 - targetFactor) * t
+            }
+
+            print("   • Correzione Velocità: ON (target ×\(String(format: "%.1f", targetFactor)), effettivo ×\(String(format: "%.2f", actualFactor)) a \(String(format: "%.0f", sampleRateHz))Hz)")
         } else {
             print("   • Correzione Velocità: OFF")
         }
