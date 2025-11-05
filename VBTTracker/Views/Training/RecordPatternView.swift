@@ -93,7 +93,6 @@ struct RecordPatternView: View {
             .onReceive(bleManager.$acceleration) { acceleration in
                 if recorder.isRecording, acceleration.count >= 3 {
                     // Estrai componente Z (indice 2) dall'array
-                    guard acceleration.count >= 3 else { return }
                     let accZ = acceleration[2]
                     recorder.addSample(accZ: accZ, timestamp: Date())
                 }
@@ -346,7 +345,7 @@ struct RecordPatternView: View {
     
     private func savePattern() {
         let load = useLoadPercentage && !loadPercentage.isEmpty
-            ? Double(loadPercentage)
+            ? (Double(loadPercentage) ?? 0)
             : nil
         
         recorder.savePattern(
