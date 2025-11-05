@@ -9,18 +9,19 @@
 import SwiftUI
 
 struct RecordPatternView: View {
-    @ObservedObject var bleManager: BLEManager
+    @ObservedObject var sensorManager: UnifiedSensorManager
+    @ObservedObject var settings = SettingsManager.shared
     @StateObject private var recorder = PatternRecorderManager()
-    
+
     @Environment(\.dismiss) var dismiss
-    
+
     // Form state
     @State private var showForm = false
     @State private var patternLabel = ""
     @State private var repCount = 5
     @State private var loadPercentage = ""
     @State private var useLoadPercentage = false
-    
+
     @State private var showDismissAlert = false
 
     var body: some View {
@@ -90,11 +91,23 @@ struct RecordPatternView: View {
                     showForm = true
                 }
             }
-            .onReceive(bleManager.$acceleration) { acceleration in
+            .onReceive(sensorManager.bleManager.$acceleration) { acceleration in
+                // Solo per WitMotion
+                guard settings.selectedSensorType == .witmotion else { return }
+
                 if recorder.isRecording, acceleration.count >= 3 {
                     // Estrai componente Z (indice 2) dall'array
                     let accZ = acceleration[2]
                     recorder.addSample(accZ: accZ, timestamp: Date())
+                }
+            }
+            .onAppear {
+                // Verifica che il sensore sia WitMotion
+                if settings.selectedSensorType != .witmotion {
+                    // Mostra alert e torna indietro
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        dismiss()
+                    }
                 }
             }
         }

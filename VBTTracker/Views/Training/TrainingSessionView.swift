@@ -9,21 +9,21 @@
 import SwiftUI
 
 struct TrainingSessionView: View {
-    @ObservedObject var bleManager: BLEManager
+    @ObservedObject var sensorManager: UnifiedSensorManager
     let targetZone: TrainingZone
     let targetReps: Int
     let loadPercentage: Double?  // ✅ STEP 3: Pattern matching pesato
-    
+
     @ObservedObject var settings = SettingsManager.shared
 
-    
     @StateObject private var sessionManager = TrainingSessionManager()
+    @StateObject private var distanceDetector = DistanceBasedRepDetector()
     @Environment(\.dismiss) var dismiss
-    
+
     @State private var dataStreamTimer: Timer?
     @State private var showEndSessionAlert = false
     @State private var showSaveSessionAlert = false
-    
+
     @State private var showSummary = false
     @State private var sessionData: TrainingSessionData?
     
@@ -105,39 +105,61 @@ struct TrainingSessionView: View {
         .onAppear {
             sessionManager.targetZone = targetZone
             let fallbackHz = 1.0 / 0.02 // 50 Hz
-            sessionManager.setSampleRateHz(bleManager.sampleRateHz ?? fallbackHz)
+            let sampleRate = sensorManager.sampleRateHz ?? fallbackHz
+            sessionManager.setSampleRateHz(sampleRate)
 
-            // 🧠 Pattern loading: usa il matching pesato della libreria + applica al detector
-            Task { @MainActor in
-                let library = LearnedPatternLibrary.shared
+            // Setup distance detector per Arduino
+            if settings.selectedSensorType == .arduino {
+                distanceDetector.sampleRateHz = sampleRate
+                distanceDetector.lookAheadSamples = 10
 
-                // Se libreria vuota → default
-                guard !library.patterns.isEmpty else {
-                    sessionManager.repDetector.apply(pattern: .defaultPattern)
-                    print("🔧 Pattern di default (libreria vuota)")
-                    return
+                // Callback quando viene rilevata una rep
+                distanceDetector.onRepDetected = { metrics in
+                    sessionManager.addRepetitionFromDistance(
+                        mpv: metrics.meanPropulsiveVelocity,
+                        ppv: metrics.peakPropulsiveVelocity,
+                        displacement: metrics.displacement,
+                        concentricDuration: metrics.concentricDuration
+                    )
                 }
 
-                print("🔍 Ricerca pattern ottimale...")
-                if let load = loadPercentage {
-                    print("   • Carico target: \(Int(load))%")
-                }
-
-                // Puoi passare anche i pochi sample iniziali (ok se vuoto: il metodo gestisce il caso)
-                let seedSeq = sessionManager.getAccelerationSamples()
-
-                // MATCH PESATO: 70% feature, 30% vicinanza %carico
-                let matched = library.matchPatternWeighted(for: seedSeq, loadPercentage: loadPercentage)
-                    ?? library.patterns.first!  // fallback: più recente
-
-                let learned = LearnedPattern(from: matched)
-                sessionManager.repDetector.apply(pattern: learned)
-
-                print("🎯 Pattern attivo: \(matched.label)")
-                print("   • ROM≈\(String(format: "%.0f cm", learned.estimatedROM*100))")
-                print("   • thr≈\(String(format: "%.2f g", learned.dynamicMinAmplitude))  • dur≈\(String(format: "%.2f s", learned.avgConcentricDuration))")
+                print("🎯 Modalità Arduino: rilevamento basato su distanza")
+                print("   • Sample rate: \(String(format: "%.1f", sampleRate)) Hz")
+                print("   • ROM target: \(String(format: "%.3f", distanceDetector.expectedROM/1000.0)) m")
             }
 
+            // 🧠 Pattern loading: solo per WitMotion
+            if settings.selectedSensorType == .witmotion {
+                Task { @MainActor in
+                    let library = LearnedPatternLibrary.shared
+
+                    // Se libreria vuota → default
+                    guard !library.patterns.isEmpty else {
+                        sessionManager.repDetector.apply(pattern: .defaultPattern)
+                        print("🔧 Pattern di default (libreria vuota)")
+                        return
+                    }
+
+                    print("🔍 Ricerca pattern ottimale...")
+                    if let load = loadPercentage {
+                        print("   • Carico target: \(Int(load))%")
+                    }
+
+                    // Puoi passare anche i pochi sample iniziali (ok se vuoto: il metodo gestisce il caso)
+                    let seedSeq = sessionManager.getAccelerationSamples()
+
+                    // MATCH PESATO: 70% feature, 30% vicinanza %carico
+                    let matched = library.matchPatternWeighted(for: seedSeq, loadPercentage: loadPercentage)
+                        ?? library.patterns.first!  // fallback: più recente
+
+                    let learned = LearnedPattern(from: matched)
+                    sessionManager.repDetector.apply(pattern: learned)
+
+                    print("🎯 Pattern attivo: \(matched.label)")
+                    print("   • ROM≈\(String(format: "%.0f cm", learned.estimatedROM*100))")
+                    print("   • thr≈\(String(format: "%.2f g", learned.dynamicMinAmplitude))  • dur≈\(String(format: "%.2f s", learned.avgConcentricDuration))")
+                }
+            }
 
             startDataStream()
             sessionManager.startRecording()
@@ -502,12 +524,21 @@ struct TrainingSessionView: View {
             let sr = max(5.0, min(hz, 200.0))         // clamp di sicurezza
             let interval = 1.0 / sr
             dataStreamTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
-                sessionManager.processSensorData(
-                    acceleration: bleManager.acceleration,
-                    angularVelocity: bleManager.angularVelocity,
-                    angles: bleManager.angles,
-                    isCalibrated: bleManager.isCalibrated
-                )
+                // Processa dati in base al tipo di sensore
+                if settings.selectedSensorType == .witmotion {
+                    sessionManager.processSensorData(
+                        acceleration: sensorManager.bleManager.acceleration,
+                        angularVelocity: sensorManager.bleManager.angularVelocity,
+                        angles: sensorManager.bleManager.angles,
+                        isCalibrated: sensorManager.bleManager.isCalibrated
+                    )
+                } else if settings.selectedSensorType == .arduino {
+                    // Processa dati di distanza
+                    distanceDetector.processSample(
+                        distance: sensorManager.arduinoManager.distance,
+                        timestamp: Date()
+                    )
+                }
 
                 if settings.stopOnVelocityLoss &&
                    sessionManager.isRecording &&
@@ -525,12 +556,12 @@ struct TrainingSessionView: View {
 
         // avvio iniziale con fallback
         let fallbackHz = 50.0
-        startTimer(with: bleManager.sampleRateHz ?? fallbackHz)
+        startTimer(with: sensorManager.sampleRateHz ?? fallbackHz)
 
         // se cambia la SR del BLE, ri-crea il timer con il nuovo passo
         NotificationCenter.default.addObserver(forName: NSNotification.Name("BLE_SR_UPDATED"), object: nil, queue: .main) { _ in
             stopDataStream()
-            startTimer(with: bleManager.sampleRateHz ?? fallbackHz)
+            startTimer(with: sensorManager.sampleRateHz ?? fallbackHz)
         }
     }
 
@@ -556,10 +587,10 @@ struct TrainingSessionView: View {
         TrainingHistoryManager.shared.saveSession(session)
         print("💾 Sessione salvata nello storico")
         
-        // 2. ✅ STEP 3: Salva pattern se sessione completata con successo
-        if data.wasSuccessful && data.totalReps >= 3 {
+        // 2. ✅ STEP 3: Salva pattern se sessione completata con successo (solo WitMotion)
+        if settings.selectedSensorType == .witmotion && data.wasSuccessful && data.totalReps >= 3 {
             let exerciseName = "Panca Piana"  // Per ora hardcoded
-            
+
             // Salva pattern con informazioni complete
             sessionManager.repDetector.savePatternSequence(
                 label: exerciseName,
@@ -568,7 +599,7 @@ struct TrainingSessionView: View {
                 avgMPV: meanMPV,
                 avgPPV: meanPPV
             )
-            
+
             print("🧠 Pattern salvato in libreria:")
             print("   • Esercizio: \(exerciseName)")
             print("   • Reps: \(data.totalReps)")

@@ -233,8 +233,65 @@ class TrainingSessionManager: ObservableObject {
         }
     }
 
+    /// Aggiungi una ripetizione dal sensore di distanza (Arduino)
+    func addRepetitionFromDistance(
+        mpv: Double,
+        ppv: Double,
+        displacement: Double,
+        concentricDuration: TimeInterval
+    ) {
+        guard isRecording else { return }
+
+        // Aggiorna contatori e storage
+        repCount += 1
+        repMeanPropulsiveVelocities.append(mpv)
+        repPeakPropulsiveVelocities.append(ppv)
+        repPeakVelocities.append(ppv)  // Per retrocompatibilità
+
+        // Prima rep: stabilisci baseline
+        if firstRepMPV == nil {
+            firstRepMPV = mpv
+            firstRepPPV = ppv
+            firstRepPeakVelocity = ppv
+        }
+
+        // Calcola velocity loss
+        if let baseline = firstRepMPV {
+            let loss = ((baseline - mpv) / baseline) * 100.0
+            velocityLoss = max(0, loss)
+        }
+
+        // Aggiorna last rep
+        lastRepMPV = mpv
+        lastRepPPV = ppv
+        lastRepPeakVelocity = ppv
+        currentVelocity = ppv
+        meanPropulsiveVelocity = mpv
+        peakPropulsiveVelocity = ppv
+
+        // Determina zona
+        let zone = SettingsManager.shared.getTrainingZone(for: mpv)
+        currentZone = zone
+        lastRepInTarget = (zone == targetZone)
+
+        // Voice feedback
+        if SettingsManager.shared.voiceFeedbackEnabled {
+            voiceFeedback.announceRep(number: repCount, velocity: mpv)
+            if !lastRepInTarget {
+                voiceFeedback.announceOffTarget()
+            }
+        }
+
+        print("✅ Rep #\(repCount) rilevata (Arduino)")
+        print("   • MPV: \(String(format: "%.3f", mpv)) m/s")
+        print("   • PPV: \(String(format: "%.3f", ppv)) m/s")
+        print("   • ROM: \(String(format: "%.3f", displacement)) m")
+        print("   • Durata: \(String(format: "%.2f", concentricDuration)) s")
+        print("   • Zona: \(zone.rawValue) \(lastRepInTarget ? "✅" : "❌")")
+    }
+
     // MARK: - Public Helpers
-    
+
     func getAccelerationSamples() -> [AccelerationSample] {
         return repDetector.getSamples()
     }

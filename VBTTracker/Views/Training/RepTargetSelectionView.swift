@@ -16,12 +16,12 @@
 import SwiftUI
 
 struct RepTargetSelectionView: View {
-    @ObservedObject var bleManager: BLEManager
+    @ObservedObject var sensorManager: UnifiedSensorManager
     let targetZone: TrainingZone
-    
+
     @State private var targetReps: Int = 5
     @State private var navigateToSession = false
-    
+
     // ✅ STEP 3: Info esercizio e carico
     @State private var loadPercentage: Double? = nil
     @State private var showExerciseInfo = false
@@ -191,7 +191,7 @@ struct RepTargetSelectionView: View {
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(isPresented: $navigateToSession) {
             TrainingSessionView(
-                bleManager: bleManager,
+                sensorManager: sensorManager,
                 targetZone: targetZone,
                 targetReps: targetReps,
                 loadPercentage: loadPercentage
@@ -241,7 +241,7 @@ struct RepTargetSelectionView: View {
 #Preview {
     NavigationStack {
         RepTargetSelectionView(
-            bleManager: BLEManager(),
+            sensorManager: UnifiedSensorManager(),
             targetZone: .strength
         )
     }
