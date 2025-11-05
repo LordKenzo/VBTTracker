@@ -498,6 +498,7 @@ enum DetectionProfile: String, CaseIterable, Codable {
     case strengthSpeed = "strengthSpeed"
     case speed = "speed"
     case maxSpeed = "maxSpeed"
+    case test = "test"
 
     var displayName: String {
         switch self {
@@ -507,6 +508,7 @@ enum DetectionProfile: String, CaseIterable, Codable {
         case .strengthSpeed: return "Forza-Velocità"
         case .speed: return "Velocità"
         case .maxSpeed: return "Velocità Massima"
+        case .test: return "Test/Debug"
         }
     }
 
@@ -518,6 +520,7 @@ enum DetectionProfile: String, CaseIterable, Codable {
         case .strengthSpeed: return "bolt.fill"
         case .speed: return "hare.fill"
         case .maxSpeed: return "bolt.circle.fill"
+        case .test: return "wrench.and.screwdriver"
         }
     }
 
@@ -529,6 +532,7 @@ enum DetectionProfile: String, CaseIterable, Codable {
         case .strengthSpeed: return .yellow
         case .speed: return .green
         case .maxSpeed: return .blue
+        case .test: return .purple
         }
     }
 
@@ -546,6 +550,8 @@ enum DetectionProfile: String, CaseIterable, Codable {
             return "Ottimizzato per velocità esplosiva (0.75-1.00 m/s). Correzioni forti, richiede SR ≥40Hz."
         case .maxSpeed:
             return "Ottimizzato per velocità massima (>1.00 m/s). Correzioni molto forti, richiede SR ≥50Hz."
+        case .test:
+            return "Soglie molto basse per testing e troubleshooting. Accetta quasi tutte le ripetizioni."
         }
     }
 
@@ -557,6 +563,7 @@ enum DetectionProfile: String, CaseIterable, Codable {
         case .strengthSpeed: return 0.50...0.75
         case .speed: return 0.75...1.00
         case .maxSpeed: return 1.00...2.00
+        case .test: return 0.0...2.0
         }
     }
 
@@ -569,6 +576,7 @@ enum DetectionProfile: String, CaseIterable, Codable {
         case .strengthSpeed: return 1.5    // Correzione media (+50%)
         case .speed: return 2.0            // Correzione forte (+100%)
         case .maxSpeed: return 2.5         // Correzione molto forte (+150%)
+        case .test: return 1.0             // Nessuna correzione (testing)
         }
     }
 
@@ -581,6 +589,7 @@ enum DetectionProfile: String, CaseIterable, Codable {
         case .strengthSpeed: return 0.85   // Leggermente più bassa
         case .speed: return 0.7            // Più bassa (movimenti veloci = meno ampi)
         case .maxSpeed: return 0.6         // Molto più bassa
+        case .test: return 0.3             // Molto permissiva per testing
         }
     }
 
@@ -593,6 +602,7 @@ enum DetectionProfile: String, CaseIterable, Codable {
         case .strengthSpeed: return 0.9
         case .speed: return 0.7            // Più breve (movimenti veloci)
         case .maxSpeed: return 0.5         // Molto più breve
+        case .test: return 0.4             // Molto permissiva per testing
         }
     }
 
@@ -607,6 +617,7 @@ enum DetectionProfile: String, CaseIterable, Codable {
         case .strengthSpeed: return false  // Troppo inaccurato con SR bassi
         case .speed: return false          // Richiede SR alto
         case .maxSpeed: return false       // Richiede SR molto alto
+        case .test: return false           // Non forza per testing
         }
     }
 
@@ -619,6 +630,7 @@ enum DetectionProfile: String, CaseIterable, Codable {
         case .strengthSpeed: return 30.0
         case .speed: return 40.0
         case .maxSpeed: return 50.0
+        case .test: return 20.0            // Funziona con qualsiasi SR
         }
     }
 
