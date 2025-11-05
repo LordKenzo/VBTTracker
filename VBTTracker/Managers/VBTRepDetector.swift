@@ -45,7 +45,12 @@ final class VBTRepDetector {
     private let MAX_PPV = 3.0
     private let warmupReps = 3
     
-    private var useDisplacementGate: Bool { sampleRateHz >= 60 }
+    private var useDisplacementGate: Bool {
+        // Rispetta il toggle dell'utente (controllo finale)
+        // Il valore del profilo è solo un suggerimento per il default
+        let forceGate = SettingsManager.shared.forceDisplacementGate
+        return (sampleRateHz >= 60) || forceGate
+    }
     private let MIN_CONC_SAMPLES = 8
 
     // MARK: - Public config
@@ -75,7 +80,11 @@ final class VBTRepDetector {
     private func minConcentricDurationSec() -> TimeInterval {
         if DEBUG_DETECTION { return 0.30 }
         let fromPattern = learnedPattern.map { max(0.50, $0.avgConcentricDuration * 0.8) } ?? max(0.50, DEFAULT_MIN_CONCENTRIC)
-        return lowSRSafeMode ? max(0.35, fromPattern * 0.85) : fromPattern  // NEW
+        let baseDuration = lowSRSafeMode ? max(0.35, fromPattern * 0.85) : fromPattern
+
+        // Applica moltiplicatore del profilo
+        let profile = SettingsManager.shared.detectionProfile
+        return baseDuration * profile.durationMultiplier
     }
 
     private var minAmplitude: Double {
@@ -89,7 +98,11 @@ final class VBTRepDetector {
         } else {
             base = 0.25
         }
-        return lowSRSafeMode ? max(0.15, base * 0.8) : base  // NEW
+        let adjusted = lowSRSafeMode ? max(0.15, base * 0.8) : base
+
+        // Applica moltiplicatore del profilo
+        let profile = SettingsManager.shared.detectionProfile
+        return adjusted * profile.amplitudeMultiplier
     }
 
     private var idleThreshold: Double {
@@ -388,8 +401,37 @@ final class VBTRepDetector {
         guard !vConc.isEmpty else { return (nil, nil, nil) }
 
         // 5) MPV/PPV
-        let mpv = vConc.reduce(0, +) / Double(vConc.count)
-        let ppv = vConc.max() ?? 0
+        var mpv = vConc.reduce(0, +) / Double(vConc.count)
+        var ppv = vConc.max() ?? 0
+
+        // Applica correzione velocità se abilitata E se SR è basso
+        // La correzione compensa la sottostima a SR bassi (~25Hz)
+        if SettingsManager.shared.enableVelocityCorrection {
+            let profile = SettingsManager.shared.detectionProfile
+            let targetFactor = profile.velocityCorrectionFactor
+
+            // Interpolazione progressiva: correzione piena a 25Hz, nulla a 60Hz
+            let minSR = 25.0  // SR minimo con correzione massima
+            let maxSR = 60.0  // SR ideale senza correzione
+
+            let actualFactor: Double
+            if sampleRateHz >= maxSR {
+                // SR alto: nessuna correzione necessaria
+                actualFactor = 1.0
+            } else if sampleRateHz <= minSR {
+                // SR molto basso: correzione massima
+                actualFactor = targetFactor
+            } else {
+                // SR intermedio: interpolazione lineare
+                // t = 0.0 a minSR (correzione piena)
+                // t = 1.0 a maxSR (nessuna correzione)
+                let t = (sampleRateHz - minSR) / (maxSR - minSR)
+                actualFactor = targetFactor + (1.0 - targetFactor) * t
+            }
+
+            mpv *= actualFactor
+            ppv *= actualFactor
+        }
 
         // 6) Spostamento durante la fase concentrica: integra v
         var x = [0.0]
@@ -539,6 +581,31 @@ extension VBTRepDetector {
         print("📊 Sample Rate: \(String(format: "%.1f", sampleRateHz)) Hz")
         print("👀 Look-ahead: \(lookAheadSamples) samples (\(String(format: "%.0f", Double(lookAheadSamples)/sampleRateHz*1000))ms)")
         print("📏 Buffer: \(samples.count) samples, \(smoothedValues.count) smoothed")
+        print("")
+        print("🎯 PROFILO: \(SettingsManager.shared.detectionProfile.displayName)")
+        if SettingsManager.shared.enableVelocityCorrection {
+            let targetFactor = SettingsManager.shared.detectionProfile.velocityCorrectionFactor
+
+            // Calcola fattore effettivo basato su SR (stessa logica di calculatePropulsiveVelocitiesAndDisplacement)
+            let minSR = 25.0
+            let maxSR = 60.0
+            let actualFactor: Double
+            if sampleRateHz >= maxSR {
+                actualFactor = 1.0
+            } else if sampleRateHz <= minSR {
+                actualFactor = targetFactor
+            } else {
+                let t = (sampleRateHz - minSR) / (maxSR - minSR)
+                actualFactor = targetFactor + (1.0 - targetFactor) * t
+            }
+
+            print("   • Correzione Velocità: ON (target ×\(String(format: "%.1f", targetFactor)), effettivo ×\(String(format: "%.2f", actualFactor)) a \(String(format: "%.0f", sampleRateHz))Hz)")
+        } else {
+            print("   • Correzione Velocità: OFF")
+        }
+        if SettingsManager.shared.forceDisplacementGate {
+            print("   • Displacement Gate Forzato: ON")
+        }
         print("")
         print("🎯 SOGLIE ATTIVE:")
         print("   • Min Amplitude: \(String(format: "%.3f", minAmplitude))g")
