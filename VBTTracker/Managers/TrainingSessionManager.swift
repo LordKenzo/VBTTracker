@@ -181,12 +181,24 @@ class TrainingSessionManager: ObservableObject {
         isCalibrated: Bool
     ) {
         guard isRecording else { return }
+            
+        guard acceleration.count >= 3 else { return }
+
         
         // 1) Ottieni accelerazione Z (verticale) e togli la gravità (coerente con il detector)
-        guard acceleration.count >= 3 else { return }
         let accZ = acceleration[2]
         let accZNoGravity = accZ   // se Z è verso l’alto; inverti segno se necessario
 
+        
+        repDetector.velocityMode = SettingsManager.shared.velocityMeasurementMode
+        // let result = repDetector.addSample(accZ: accZNoGravity, timestamp: Date())
+        
+        // 🔍 DEBUG: ogni 100 samples stampa stato
+        if repDetector.getSamples().count % 100 == 0 {
+            print("\n⏱️  Samples: \(repDetector.getSamples().count)")
+            repDetector.printDebugState()
+            print(repDetector.validateCurrentMovement())
+        }
         // 2) Passa modalità velocità al detector
         repDetector.velocityMode = SettingsManager.shared.velocityMeasurementMode
         

@@ -35,6 +35,13 @@ final class LearnedPatternLibrary: ObservableObject {
     // MARK: - Gestione libreria
 
     func addPattern(_ pattern: PatternSequence) {
+        // Valida ROM ragionevole (30-80cm per bench press)
+        let estimatedROM = pattern.avgAmplitude * 9.81 * pow(pattern.avgDuration / Double(pattern.repCount), 2) / 2.0
+        
+        guard (0.20...0.80).contains(estimatedROM) else {
+            print("⚠️  Pattern scartato: ROM=\(String(format: "%.2f", estimatedROM))m non realistico")
+            return
+        }
         patterns.append(pattern)
         if patterns.count > maxPatterns { patterns.removeFirst() }
         save()

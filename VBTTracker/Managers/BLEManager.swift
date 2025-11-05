@@ -185,62 +185,89 @@ final class BLEManager: NSObject, ObservableObject, SensorDataProvider {
         print("Scansione fermata 🔍 Trovati \(discoveredDevices.count) dispositivi")
     }
 
-    // MARK: - Sample rate estimation (robusta)
     
-    private var pktTimestamps: [TimeInterval] = []
-    private let srWindow: TimeInterval = 0.5
-    
+    // MARK: - Sample rate estimation (STABILE)
+
+    private var packetTimestamps: [Date] = []
+    private let SR_WINDOW_SIZE = 50        // Calcola SR su 50 pacchetti
+    private let SR_UPDATE_THRESHOLD = 10.0 // Aggiorna solo se varia >10Hz
+    private var lastPublishedSR: Double?
+    private var srStableCounter = 0        // Conta pacchetti consecutivi stabili
+
     private func resetSampleRateEstimation() {
         lastPacketTime = nil
         intervalEMA = nil
         sampleRateHz = nil
-        pktTimestamps.removeAll()
+        packetTimestamps.removeAll()
+        lastPublishedSR = nil
+        srStableCounter = 0
     }
 
     private var lastSRNotifyTime: Date = .distantPast
-    private var lastSRNotifiedValue: Double = 0
 
     private func updateSRonPacket() {
         let now = Date()
-        defer { lastPacketTime = now }
-
-        guard let last = lastPacketTime else { return }
-        let dt = now.timeIntervalSince(last)
-        guard dt > 0 else { return }
-
-        // EMA
-        intervalEMA = (intervalEMA == nil) ? dt : ((1 - srAlpha) * intervalEMA! + srAlpha * dt)
-
-        // Safeguard
-        if let ema = intervalEMA, ema < 0.002 || ema > 1.0 {
-            // fuori range (500 Hz … 1 Hz)
-            intervalEMA = nil
-            lastPacketTime = nil
-            return
+        packetTimestamps.append(now)
+        
+        // Mantieni solo gli ultimi N pacchetti
+        if packetTimestamps.count > SR_WINDOW_SIZE {
+            packetTimestamps.removeFirst()
         }
-
-        guard let meanDt = intervalEMA, meanDt > 0 else { return }
-
-        // Hz calcolati e clamped
-        let sr = max(5.0, min(1.0 / meanDt, 500.0))
-
-        // Aggiorna solo se cambia “abbastanza”
-        if sampleRateHz == nil || abs((sampleRateHz ?? 0) - sr) > 5.0 {
-            sampleRateHz = sr
-            print("📊 Sample rate aggiornato: \(String(format: "%.1f", sr)) Hz")
-
-            // 🔔 Notifica la View (throttle 300 ms o delta > 5 Hz)
-            let shouldNotify = now.timeIntervalSince(lastSRNotifyTime) > 0.30
-                || abs(lastSRNotifiedValue - sr) > 5.0
-
-            if shouldNotify {
+        
+        // Calcola SR solo se hai abbastanza campioni
+        guard packetTimestamps.count >= 20 else { return }
+        
+        let totalTime = now.timeIntervalSince(packetTimestamps.first!)
+        guard totalTime > 0 else { return }
+        
+        let instantSR = Double(packetTimestamps.count - 1) / totalTime
+        
+        // Clamp a range ragionevole
+        let clampedSR = max(5.0, min(instantSR, 500.0))
+        
+        // Pubblicazione con hysteresis
+        let shouldPublish: Bool
+        if let last = lastPublishedSR {
+            // Aggiorna solo se:
+            // 1. Varia più del threshold (10Hz)
+            // 2. È stabile da almeno 10 pacchetti
+            let delta = abs(clampedSR - last)
+            
+            if delta > SR_UPDATE_THRESHOLD {
+                // Grande variazione -> resetta counter
+                srStableCounter = 0
+                shouldPublish = false
+            } else {
+                // Piccola variazione -> incrementa counter
+                srStableCounter += 1
+                shouldPublish = srStableCounter >= 10 // Stabile per 10 pacchetti
+            }
+        } else {
+            // Prima pubblicazione
+            shouldPublish = true
+            srStableCounter = 0
+        }
+        
+        if shouldPublish {
+            let oldSR = sampleRateHz
+            sampleRateHz = clampedSR
+            lastPublishedSR = clampedSR
+            
+            // Log solo se cambia significativamente
+            if oldSR == nil || abs((oldSR ?? 0) - clampedSR) > 5.0 {
+                print("📊 Sample rate stabile: \(String(format: "%.1f", clampedSR)) Hz (finestra \(packetTimestamps.count) pacchetti)")
+            }
+            
+            // Notifica cambio (throttle 1 secondo)
+            if now.timeIntervalSince(lastSRNotifyTime) > 1.0 {
                 lastSRNotifyTime = now
-                lastSRNotifiedValue = sr
                 NotificationCenter.default.post(
                     name: NSNotification.Name("BLE_SR_UPDATED"),
                     object: nil
                 )
             }
+            
+            srStableCounter = 0 // Reset counter dopo pubblicazione
         }
     }
 
@@ -333,9 +360,14 @@ extension BLEManager: CBCentralManagerDelegate {
             self.statusMessage = "Connesso"
             self.resetSampleRateEstimation()
         }
-
+        
         peripheral.delegate = self
         peripheral.discoverServices([Self.serviceUUID])
+        
+        // 🆕 AUTO-CONFIGURA a 200Hz dopo 1 secondo (tempo per discovery)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            self?.configureFor200Hz()
+        }
     }
 
     func centralManager(_ central: CBCentralManager,
@@ -462,44 +494,89 @@ extension BLEManager: CBPeripheralDelegate {
     /// Prova prima la forma "code" (0x0B = 200Hz). In fallback usa la forma "valore" (200 = 0x00C8).
     func configureFor200Hz() {
         guard writeCharacteristic != nil else {
-            print("⚠️ Impossibile configurare: nessuna caratteristica di WRITE"); return
+            print("⚠️ Impossibile configurare: nessuna caratteristica di WRITE")
+            return
         }
-        print("⚙️ Configurazione 200 Hz: unlock → BW 256 → RATE 200 → save → verify")
-
+        
+        print("⚙️ Inizio configurazione 200 Hz...")
+        
+        // Step 1: Unlock (50ms)
         unlock()
+        
+        // Step 2: Set Bandwidth 256Hz (100ms)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-            self.setBandwidth(0x00)           // 256 Hz
+            self.setBandwidth(0x00) // 256 Hz
+            print("   • Bandwidth → 256Hz")
         }
+        
+        // Step 3: Set Return Rate 200Hz (150ms)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.10) {
-            self.setReturnRateCode(0x0B)      // 200 Hz (forma 'code')
+            self.setReturnRateCode(0x0B) // 200 Hz
+            print("   • Return Rate → 200Hz (code 0x0B)")
         }
+        
+        // Step 4: Save config (200ms)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            self.saveConfig()
+            print("   • Config salvata")
+        }
+        
+        // Step 5: Verifica dopo 500ms
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.50) {
+            self.readBandwidth()
+            self.readRate()
+            print("   • Verifica configurazione...")
+        }
+        
+        // Step 6: Check sample rate dopo 1.5s
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            let currentSR = self.sampleRateHz ?? 0
+            print("   • Sample rate rilevato: \(String(format: "%.1f", currentSR)) Hz")
+            
+            if currentSR < 80 {
+                print("⚠️ Sample rate basso, retry con 100Hz...")
+                self.retryWith100Hz()
+            } else if currentSR >= 150 {
+                print("✅ Sensore configurato correttamente a ~200Hz")
+            } else {
+                print("⚠️ Sample rate intermedio (~100Hz), accettabile ma non ottimale")
+            }
+        }
+    }
+
+    /// Fallback: prova 100Hz se 200Hz non funziona
+    private func retryWith100Hz() {
+        unlock()
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            self.setBandwidth(0x00) // 256 Hz
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.10) {
+            self.setReturnRateCode(0x09) // 100 Hz
+            print("   • Retry: Return Rate → 100Hz (code 0x09)")
+        }
+        
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
             self.saveConfig()
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.40) {
-            self.readBandwidth()
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.50) {
             self.readRate()
         }
-
-        // 🔎 Verifica: leggiamo i registri dopo 250ms
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.40) {
-            self.readBandwidth()
-            self.readRate()
-        }
-
-        // Fallback: se non è cambiato nulla, prova 100 Hz
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.70) {
-            if (self.sampleRateHz ?? 0) < 50 {
-                print("↪️  Fallback: provo 100 Hz (0x09)")
-                self.unlock()
-                self.setBandwidth(0x00)
-                self.setReturnRateCode(0x09)  // 100 Hz
-                self.saveConfig()
-
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                    self.readBandwidth()
-                    self.readRate()
-                }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            let currentSR = self.sampleRateHz ?? 0
+            print("   • Sample rate dopo retry: \(String(format: "%.1f", currentSR)) Hz")
+            
+            if currentSR >= 50 {
+                print("✅ Configurazione 100Hz accettata")
+            } else {
+                print("❌ Configurazione fallita, sample rate troppo basso")
+                print("   Possibili cause:")
+                print("   1. Sensore non supporta comandi di configurazione")
+                print("   2. Caratteristica WRITE non corretta")
+                print("   3. Firmware sensore non standard")
             }
         }
     }

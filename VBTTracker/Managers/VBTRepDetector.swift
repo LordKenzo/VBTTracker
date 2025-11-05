@@ -509,3 +509,121 @@ extension VBTRepDetector {
         }
     }
 }
+
+// Aggiungi questa extension in fondo a VBTRepDetector.swift
+
+extension VBTRepDetector {
+    
+    /// Debug: stampa stato completo detector
+    func printDebugState() {
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        print("🔍 VBT DETECTOR STATE")
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        print("📊 Sample Rate: \(String(format: "%.1f", sampleRateHz)) Hz")
+        print("👀 Look-ahead: \(lookAheadSamples) samples (\(String(format: "%.0f", Double(lookAheadSamples)/sampleRateHz*1000))ms)")
+        print("📏 Buffer: \(samples.count) samples, \(smoothedValues.count) smoothed")
+        print("")
+        print("🎯 SOGLIE ATTIVE:")
+        print("   • Min Amplitude: \(String(format: "%.3f", minAmplitude))g")
+        print("   • Idle Threshold: \(String(format: "%.3f", idleThreshold))g")
+        print("   • Min Concentric: \(String(format: "%.2f", minConcentricDurationSec()))s")
+        print("   • Min Refractory: \(String(format: "%.2f", minRefractory))s")
+        print("   • Displacement Gate: \(useDisplacementGate ? "ON" : "OFF")")
+        if useDisplacementGate {
+            print("   • Range Displacement: \(MIN_CONC_DISPLACEMENT)-\(MAX_CONC_DISPLACEMENT)m")
+        }
+        print("")
+        print("🔄 STATO CICLO:")
+        print("   • Cycle State: \(cycleState)")
+        print("   • Direction: \(currentDirection)")
+        print("   • Is Tracking Concentric: \(isTrackingConcentric)")
+        print("   • Concentric Samples: \(concentricSamples.count)")
+        print("   • Is First Movement: \(isFirstMovement)")
+        print("   • Is Warmup: \(isInWarmup)")
+        print("")
+        if let peak = lastPeak {
+            print("📈 Last Peak: \(String(format: "%.3f", peak.value))g @ idx \(peak.index)")
+        }
+        if let valley = lastValley {
+            print("📉 Last Valley: \(String(format: "%.3f", valley.value))g @ idx \(valley.index)")
+        }
+        if let lastRep = lastRepTime {
+            let elapsed = Date().timeIntervalSince(lastRep)
+            print("⏱️  Last Rep: \(String(format: "%.2f", elapsed))s ago")
+        }
+        print("")
+        if let pattern = learnedPattern {
+            print("🧠 PATTERN CARICATO:")
+            print("   • ROM: \(String(format: "%.2f", pattern.estimatedROM))m")
+            print("   • Avg Amplitude: \(String(format: "%.3f", pattern.dynamicMinAmplitude))g")
+            print("   • Avg Duration: \(String(format: "%.2f", pattern.avgConcentricDuration))s")
+            print("   • Avg Velocity: \(String(format: "%.3f", pattern.avgPeakVelocity))m/s")
+        } else {
+            print("🧠 Nessun pattern caricato (modalità adaptive)")
+        }
+        
+        if !smoothedValues.isEmpty {
+            let last5 = smoothedValues.suffix(5)
+            print("")
+            print("📊 ULTIMI 5 VALORI SMOOTHED:")
+            for (i, val) in last5.enumerated() {
+                let idx = smoothedValues.count - 5 + i
+                print("   [\(idx)]: \(String(format: "%.4f", val))g")
+            }
+            
+            // Controlla se c'è movimento
+            let range = (last5.max() ?? 0) - (last5.min() ?? 0)
+            print("   Range: \(String(format: "%.4f", range))g \(range > minAmplitude ? "✅" : "⚠️  sotto soglia")")
+        }
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    }
+    
+    /// Debug: valida se il movimento corrente potrebbe diventare una rep
+    func validateCurrentMovement() -> String {
+        guard let valley = lastValley else {
+            return "❌ Nessuna valley rilevata (fase discendente non completata)"
+        }
+        
+        guard isTrackingConcentric, !concentricSamples.isEmpty else {
+            return "❌ Non in fase concentrica"
+        }
+        
+        let now = Date()
+        let concDur = now.timeIntervalSince(valley.time)
+        let current = smoothedValues.last ?? 0
+        let amplitude = current - valley.value
+        
+        var issues: [String] = []
+        
+        if amplitude < minAmplitude {
+            issues.append("Ampiezza bassa: \(String(format: "%.3f", amplitude))g < \(String(format: "%.3f", minAmplitude))g")
+        }
+        
+        if concDur < minConcentricDurationSec() {
+            issues.append("Durata breve: \(String(format: "%.2f", concDur))s < \(String(format: "%.2f", minConcentricDurationSec()))s")
+        }
+        
+        if let lastRep = lastRepTime {
+            let refractory = now.timeIntervalSince(lastRep)
+            if refractory < minRefractory {
+                issues.append("Refrattario: \(String(format: "%.2f", refractory))s < \(String(format: "%.2f", minRefractory))s")
+            }
+        }
+        
+        if useDisplacementGate, concentricSamples.count >= MIN_CONC_SAMPLES {
+            let (_, _, disp) = calculatePropulsiveVelocitiesAndDisplacement(from: concentricSamples)
+            if let d = disp {
+                let inRange = (MIN_CONC_DISPLACEMENT...MAX_CONC_DISPLACEMENT).contains(d)
+                if !inRange {
+                    issues.append("Displacement \(String(format: "%.2f", d))m fuori range [\(MIN_CONC_DISPLACEMENT)-\(MAX_CONC_DISPLACEMENT)]m")
+                }
+            }
+        }
+        
+        if issues.isEmpty {
+            return "✅ Movimento valido - in attesa del peak"
+        } else {
+            return "⚠️  Issues:\n   • " + issues.joined(separator: "\n   • ")
+        }
+    }
+}
