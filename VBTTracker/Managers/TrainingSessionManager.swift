@@ -66,11 +66,7 @@ class TrainingSessionManager: ObservableObject {
     var targetZone: TrainingZone = .strength
     
     // MARK: - Private Properties
-    
-    private var velocity: Double = 0.0
-    private var isMoving = false
-    private var phase: MovementPhase = .idle
-    
+
     let repDetector = VBTRepDetector()
     private let voiceFeedback = VoiceFeedbackManager()
 
@@ -357,7 +353,6 @@ class TrainingSessionManager: ObservableObject {
     }
     
     private func resetMetrics() {
-        velocity = 0.0
         currentVelocity = 0.0
         
         // Reset velocità separate
