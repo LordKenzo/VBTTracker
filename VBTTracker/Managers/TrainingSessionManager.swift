@@ -369,9 +369,7 @@ class TrainingSessionManager: ObservableObject {
         meanVelocity = 0.0
         velocityLoss = 0.0
         repCount = 0
-        
-        isMoving = false
-        phase = .idle
+
         inConcentricPhase = false
         concentricPeakReached = false
         lastRepTime = nil
