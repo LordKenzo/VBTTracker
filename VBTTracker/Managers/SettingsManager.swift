@@ -136,6 +136,11 @@ class SettingsManager: ObservableObject {
         didSet { save() }
     }
 
+    /// Tipo di sensore selezionato dall'utente
+    @Published var selectedSensorType: SensorType {
+        didSet { save() }
+    }
+
     private func loadLastPeripheralID() {
         lastConnectedPeripheralID = UserDefaults.standard.string(forKey: Keys.lastPeripheralID)
     }
@@ -171,6 +176,7 @@ class SettingsManager: ObservableObject {
         static let detectionProfile = "detectionProfile"
         static let enableVelocityCorrection = "enableVelocityCorrection"
         static let forceDisplacementGate = "forceDisplacementGate"
+        static let selectedSensorType = "selectedSensorType"
     }
     
     // MARK: - Initialization
@@ -253,6 +259,10 @@ class SettingsManager: ObservableObject {
         enableVelocityCorrection = UserDefaults.standard.object(forKey: Keys.enableVelocityCorrection) as? Bool ?? false
         forceDisplacementGate = UserDefaults.standard.object(forKey: Keys.forceDisplacementGate) as? Bool ?? false
 
+        // Tipo Sensore
+        let loadedSensorTypeRaw = UserDefaults.standard.string(forKey: Keys.selectedSensorType) ?? "witmotion"
+        selectedSensorType = SensorType(rawValue: loadedSensorTypeRaw) ?? .witmotion
+
         loadLastPeripheralID()
 
 
@@ -305,6 +315,9 @@ class SettingsManager: ObservableObject {
         UserDefaults.standard.set(detectionProfile.rawValue, forKey: Keys.detectionProfile)
         UserDefaults.standard.set(enableVelocityCorrection, forKey: Keys.enableVelocityCorrection)
         UserDefaults.standard.set(forceDisplacementGate, forKey: Keys.forceDisplacementGate)
+
+        // Tipo Sensore
+        UserDefaults.standard.set(selectedSensorType.rawValue, forKey: Keys.selectedSensorType)
 
         let modeString = velocityMeasurementMode == .fullROM ? "fullROM" : "concentricOnly"
           UserDefaults.standard.set(modeString, forKey: Keys.velocityMode)
@@ -364,6 +377,7 @@ class SettingsManager: ObservableObject {
         detectionProfile = .generic
         enableVelocityCorrection = false
         forceDisplacementGate = false
+        selectedSensorType = .witmotion
 
         print("🔄 Impostazioni resettate ai valori predefiniti")
     }

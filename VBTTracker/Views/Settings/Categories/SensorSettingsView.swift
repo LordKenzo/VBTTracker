@@ -22,6 +22,29 @@ struct SensorSettingsView: View {
     
     var body: some View {
         List {
+            // MARK: - Sensor Type Selection
+            Section {
+                Picker("Tipo Sensore", selection: $settings.selectedSensorType) {
+                    ForEach(SensorType.allCases, id: \.self) { type in
+                        HStack {
+                            Image(systemName: type.icon)
+                            Text(type.displayName)
+                        }
+                        .tag(type)
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(settings.selectedSensorType.description)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Tipo di Sensore")
+            } footer: {
+                Text("Seleziona il tipo di sensore che stai utilizzando. Il sensore Arduino con VL53L0X misura direttamente la distanza ed è più preciso per VBT.")
+            }
+
             // MARK: - Sensor Status Section
             Section {
                 sensorStatusRow
