@@ -12,6 +12,8 @@ struct TrainingSessionView: View {
     @ObservedObject var bleManager: BLEManager
     let targetZone: TrainingZone
     let targetReps: Int
+    let loadPercentage: Double?  // ✅ STEP 3: Pattern matching pesato
+    
     @ObservedObject var settings = SettingsManager.shared
 
     
@@ -105,27 +107,37 @@ struct TrainingSessionView: View {
             let fallbackHz = 1.0 / 0.02 // 50 Hz
             sessionManager.setSampleRateHz(bleManager.sampleRateHz ?? fallbackHz)
 
-            // 🧠 STEP 2.5: Smart pattern loading dalla libreria
+            // 🧠 Pattern loading: usa il matching pesato della libreria + applica al detector
             Task { @MainActor in
                 let library = LearnedPatternLibrary.shared
-                
-                if let bestMatch = library.patterns.first {
-                    // Usa il pattern più recente dalla libreria
-                    let pattern = LearnedPattern(
-                        rom: bestMatch.avgAmplitude,
-                        minThreshold: 0.40,
-                        avgVelocity: bestMatch.avgPPV,
-                        avgConcentricDuration: bestMatch.avgDuration,
-                        restThreshold: 0.10
-                    )
-                    sessionManager.repDetector.learnedPattern = pattern
-                    print("📚 Pattern dalla libreria: \(bestMatch.label) | ROM: \(String(format: "%.0fcm", bestMatch.avgAmplitude * 100))")
-                } else {
-                    // Fallback: usa default pattern se libreria vuota
-                    sessionManager.repDetector.learnedPattern = LearnedPattern.defaultPattern
+
+                // Se libreria vuota → default
+                guard !library.patterns.isEmpty else {
+                    sessionManager.repDetector.apply(pattern: .defaultPattern)
                     print("🔧 Pattern di default (libreria vuota)")
+                    return
                 }
+
+                print("🔍 Ricerca pattern ottimale...")
+                if let load = loadPercentage {
+                    print("   • Carico target: \(Int(load))%")
+                }
+
+                // Puoi passare anche i pochi sample iniziali (ok se vuoto: il metodo gestisce il caso)
+                let seedSeq = sessionManager.getAccelerationSamples()
+
+                // MATCH PESATO: 70% feature, 30% vicinanza %carico
+                let matched = library.matchPatternWeighted(for: seedSeq, loadPercentage: loadPercentage)
+                    ?? library.patterns.first!  // fallback: più recente
+
+                let learned = LearnedPattern(from: matched)
+                sessionManager.repDetector.apply(pattern: learned)
+
+                print("🎯 Pattern attivo: \(matched.label)")
+                print("   • ROM≈\(String(format: "%.0f cm", learned.estimatedROM*100))")
+                print("   • thr≈\(String(format: "%.2f g", learned.dynamicMinAmplitude))  • dur≈\(String(format: "%.2f s", learned.avgConcentricDuration))")
             }
+
 
             startDataStream()
             sessionManager.startRecording()
@@ -137,13 +149,14 @@ struct TrainingSessionView: View {
             }
         }
         .alert("Terminare Sessione?", isPresented: $showEndSessionAlert) {
-            Button("Annulla", role: .cancel) { }
             Button("Termina", role: .destructive) {
-                // Crea session data PRIMA di stoppare
-                sessionData = sessionManager.createSessionData()
+                // ✅ Usa direttamente il factory method del modello
+                sessionData = TrainingSessionData.from(
+                    manager: sessionManager,
+                    targetZone: targetZone,
+                    velocityLossThreshold: SettingsManager.shared.velocityLossThreshold
+                )
                 sessionManager.stopRecording()
-                
-                // Chiedi se salvare
                 showSaveSessionAlert = true
             }
         } message: {
@@ -482,31 +495,45 @@ struct TrainingSessionView: View {
     // MARK: - Data Stream
     
     private func startDataStream() {
-        dataStreamTimer = Timer.scheduledTimer(withTimeInterval: 0.02, repeats: true) { _ in
-            sessionManager.processSensorData(
-                acceleration: bleManager.acceleration,
-                angularVelocity: bleManager.angularVelocity,
-                angles: bleManager.angles,
-                isCalibrated: bleManager.isCalibrated
-            )
-            
-            // Check velocity loss
-            if settings.stopOnVelocityLoss &&
-               sessionManager.isRecording &&
-               sessionManager.velocityLoss >= settings.velocityLossThreshold {
-                sessionManager.stopRecording()
-            }
-            
-            // Notifica visiva al raggiungimento target
-            if sessionManager.isRecording &&
-               sessionManager.repCount == self.targetReps {
-                
-                // Haptic feedback
-                let generator = UINotificationFeedbackGenerator()
-                generator.notificationOccurred(.success)
+        // chiudi eventuale timer precedente
+        stopDataStream()
+
+        func startTimer(with hz: Double) {
+            let sr = max(5.0, min(hz, 200.0))         // clamp di sicurezza
+            let interval = 1.0 / sr
+            dataStreamTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
+                sessionManager.processSensorData(
+                    acceleration: bleManager.acceleration,
+                    angularVelocity: bleManager.angularVelocity,
+                    angles: bleManager.angles,
+                    isCalibrated: bleManager.isCalibrated
+                )
+
+                if settings.stopOnVelocityLoss &&
+                   sessionManager.isRecording &&
+                   sessionManager.velocityLoss >= settings.velocityLossThreshold {
+                    sessionManager.stopRecording()
+                }
+
+                if sessionManager.isRecording &&
+                   sessionManager.repCount == self.targetReps {
+                    let generator = UINotificationFeedbackGenerator()
+                    generator.notificationOccurred(.success)
+                }
             }
         }
+
+        // avvio iniziale con fallback
+        let fallbackHz = 50.0
+        startTimer(with: bleManager.sampleRateHz ?? fallbackHz)
+
+        // se cambia la SR del BLE, ri-crea il timer con il nuovo passo
+        NotificationCenter.default.addObserver(forName: NSNotification.Name("BLE_SR_UPDATED"), object: nil, queue: .main) { _ in
+            stopDataStream()
+            startTimer(with: bleManager.sampleRateHz ?? fallbackHz)
+        }
     }
+
     
     private func stopDataStream() {
         dataStreamTimer?.invalidate()
@@ -516,12 +543,47 @@ struct TrainingSessionView: View {
     // MARK: - Save Session
     
     private func saveSession() {
+        // Calcola le medie reali
+        let meanMPV = sessionManager.averageMPV()
+        let meanPPV = sessionManager.averagePPV()
+
+
+        
         guard let data = sessionData else { return }
         
+        // 1. Salva sessione nello storico
         let session = TrainingSession.from(data, targetReps: targetReps)
         TrainingHistoryManager.shared.saveSession(session)
-        
         print("💾 Sessione salvata nello storico")
+        
+        // 2. ✅ STEP 3: Salva pattern se sessione completata con successo
+        if data.wasSuccessful && data.totalReps >= 3 {
+            let exerciseName = "Panca Piana"  // Per ora hardcoded
+            
+            // Salva pattern con informazioni complete
+            sessionManager.repDetector.savePatternSequence(
+                label: exerciseName,
+                repCount: data.totalReps,
+                loadPercentage: loadPercentage,
+                avgMPV: meanMPV,
+                avgPPV: meanPPV
+            )
+            
+            print("🧠 Pattern salvato in libreria:")
+            print("   • Esercizio: \(exerciseName)")
+            print("   • Reps: \(data.totalReps)")
+            if let load = loadPercentage {
+                print("   • Carico: \(Int(load))%")
+            }
+            if !data.reps.isEmpty {
+                let meanMPV = data.reps.map(\.meanVelocity).reduce(0, +) / Double(data.reps.count)
+                print("   • MPV medio: \(String(format: "%.3f", meanMPV)) m/s")
+            } else {
+                print("   • MPV medio: N/D (nessuna ripetizione registrata)")
+            }
+        } else {
+            print("⚠️ Pattern non salvato (sessione non completata o <3 reps)")
+        }
     }
 }
 
@@ -579,7 +641,8 @@ struct RepToastView: View {
         TrainingSessionView(
             bleManager: BLEManager(),
             targetZone: .strength,
-            targetReps: 5
+            targetReps: 5,
+            loadPercentage: 70
         )
     }
 }

@@ -128,12 +128,6 @@ struct RepDetectionSettingsView: View {
                     description: lookAheadDescription
                 )
 
-                Text(lookAheadDescription)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.vertical, 4)
-
             } header: {
                 Text("Elaborazione Segnale")
             } footer: {

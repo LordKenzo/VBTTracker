@@ -3,7 +3,7 @@
 //  VBTTracker
 //
 //  Hub principale impostazioni - Architettura modulare
-//  CLEAN: Rimosso codice cinematico, aggiunto picker algoritmo
+//  ✅ AGGIORNATO con @ObservedObject per patternLibrary
 //
 
 import SwiftUI
@@ -11,9 +11,6 @@ import SwiftUI
 // MARK: - Detection Algorithm Enum
 enum RepDetectionAlgorithm: String, CaseIterable, Identifiable {
     case zAxisSimple = "Asse Z (Semplice)"
-    // case zAxisML = "Asse Z + ML"           // ðŸ”œ Futuro
-    // case multiAxisKinematic = "Multi-Asse" // ðŸ”œ Futuro
-    // case visionIMU = "Vision + IMU"        // ðŸ”œ Futuro
     
     var id: String { self.rawValue }
     
@@ -21,12 +18,6 @@ enum RepDetectionAlgorithm: String, CaseIterable, Identifiable {
         switch self {
         case .zAxisSimple:
             return "Pattern picco-valle-picco su asse verticale"
-        // case .zAxisML:
-        //     return "Z-Axis validato con Machine Learning"
-        // case .multiAxisKinematic:
-        //     return "Analisi cinematica completa (X/Y/Z + giroscopio)"
-        // case .visionIMU:
-        //     return "Fusione dati Vision Pro + sensore IMU"
         }
     }
 }
@@ -37,10 +28,12 @@ struct SettingsView: View {
     @ObservedObject var settings = SettingsManager.shared
     @ObservedObject private var patternLibrary = LearnedPatternLibrary.shared
     
+    // ✅ CORREZIONE: @ObservedObject per aggiornamento real-time
+    @ObservedObject private var patternLibrary = LearnedPatternLibrary.shared
+    
     @Environment(\.dismiss) var dismiss
     @State private var showResetAlert = false
     
-    // Nuovo: Selezione algoritmo (attualmente solo Z-Axis)
     @AppStorage("selectedDetectionAlgorithm") private var selectedAlgorithmRaw = RepDetectionAlgorithm.zAxisSimple.rawValue
     
     private var selectedAlgorithm: RepDetectionAlgorithm {
@@ -57,12 +50,10 @@ struct SettingsView: View {
             List {
                 // MARK: - Detection Algorithm Section
                 Section {
-                    // Picker algoritmo
                     Picker("Algoritmo", selection: Binding(
                         get: { selectedAlgorithm },
                         set: { newValue in
                             selectedAlgorithm = newValue
-                            // Propaga cambio a TrainingSessionManager
                             NotificationCenter.default.post(
                                 name: .detectionAlgorithmChanged,
                                 object: newValue.rawValue
@@ -75,7 +66,6 @@ struct SettingsView: View {
                     }
                     .pickerStyle(.menu)
                     
-                    // Descrizione algoritmo selezionato
                     HStack(alignment: .top, spacing: 8) {
                         Image(systemName: "info.circle")
                             .foregroundStyle(.secondary)
@@ -95,7 +85,6 @@ struct SettingsView: View {
                 
                 // MARK: - Categories Section
                 Section {
-                    // Sensore
                     NavigationLink(destination: SensorSettingsView(
                         bleManager: bleManager,
                         calibrationManager: calibrationManager
@@ -108,7 +97,6 @@ struct SettingsView: View {
                         )
                     }
                     
-                    // Pattern Appresi (🆕)
                     NavigationLink(destination: LearnedPatternsView()) {
                         NavigationSettingRow(
                             title: "Pattern Appresi",
@@ -118,7 +106,6 @@ struct SettingsView: View {
                         )
                     }
                     
-                    // Registra Nuovo Pattern (🆕)
                     NavigationLink(destination: RecordPatternView(bleManager: bleManager)) {
                         NavigationSettingRow(
                             title: "Registra Pattern",
@@ -131,14 +118,13 @@ struct SettingsView: View {
                     
                     NavigationLink(destination: VelocitySettingsView()) {
                         NavigationSettingRow(
-                            title: "Velocità ",
+                            title: "Velocità",
                             subtitle: "Zone VBT e Velocity Loss",
                             icon: "speedometer",
                             iconColor: .blue
                         )
                     }
                     
-                    // Rilevamento Rep (Avanzato)
                     NavigationLink(destination: RepDetectionSettingsView()) {
                         NavigationSettingRow(
                             title: "Rilevamento Rep",
@@ -149,7 +135,6 @@ struct SettingsView: View {
                         )
                     }
                     
-                    // Audio
                     NavigationLink(destination: AudioSettingsView()) {
                         NavigationSettingRow(
                             title: "Audio",
@@ -162,18 +147,17 @@ struct SettingsView: View {
                     Text("Categorie")
                 }
                 
-                
                 // MARK: - About Section
                 Section {
                     InfoSettingRow(
                         title: "Versione",
-                        value: "1.0.0",
+                        value: "1.1.0",
                         icon: "info.circle"
                     )
                     
                     InfoSettingRow(
                         title: "Build",
-                        value: "2024.10.25",
+                        value: "2024.11.02",
                         icon: "hammer"
                     )
                     
@@ -245,6 +229,7 @@ struct SettingsView: View {
         }
     }
     
+    // ✅ CORREZIONE: Ora si aggiorna in tempo reale
     private var patternSubtitle: String {
         let count = patternLibrary.patterns.count
         if count == 0 {
@@ -256,6 +241,7 @@ struct SettingsView: View {
         }
     }
 }
+
 // MARK: - NotificationCenter Extension
 extension Notification.Name {
     static let detectionAlgorithmChanged = Notification.Name("detectionAlgorithmChanged")

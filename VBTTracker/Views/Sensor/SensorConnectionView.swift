@@ -4,7 +4,7 @@
 //
 //  Interfaccia per connessione e visualizzazione dati sensore
 //
-
+/*
 import SwiftUI
 
 struct SensorConnectionView: View {
@@ -233,3 +233,4 @@ struct SensorConnectionView: View {
 #Preview {
     SensorConnectionView()
 }
+*/

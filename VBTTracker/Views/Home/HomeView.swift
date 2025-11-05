@@ -47,6 +47,10 @@ struct HomeView: View {
                         Text("Velocity-Based Training")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
+                        
+                        Text("by Lorenzo Franceschini")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
                     }
                     
                     Spacer()
@@ -69,7 +73,7 @@ struct HomeView: View {
                         .disabled(!bleManager.isConnected || !bleManager.isCalibrated)
                         
                         // Connect Sensor Button (if not connected)
-                        if !bleManager.isConnected {
+                        /*if !bleManager.isConnected {
                             Button(action: {
                                 showConnectionView = true
                             }) {
@@ -79,7 +83,7 @@ struct HomeView: View {
                                     .frame(height: 56)
                             }
                             .buttonStyle(.bordered)
-                        }
+                        }*/
                     }
                     .padding(.horizontal)
                     
@@ -116,7 +120,12 @@ struct HomeView: View {
                 TrainingHistoryView()
             }
             .sheet(isPresented: $showConnectionView) {
-                SensorConnectionView()
+                NavigationStack {
+                    SensorSettingsView(
+                        bleManager: bleManager,
+                        calibrationManager: calibrationManager
+                    )
+                }
             }
         }
     }

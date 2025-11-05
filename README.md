@@ -24,7 +24,7 @@ VBTTracker/
 
 ## ✨ Funzionalità primarie
 - ✅ Scansione dispositivi Bluetooth LE
-- ✅ Supporto alla connessione e scambio dati del sensore WitMotion WT9011DCL reperibile in commercio
+- ✅ Supporto alla connessione e scambio dati del sensore WitMotion WT9011DCL-BT50 reperibile in commercio
 - ✅ Parsing pacchetti IMU (formato 0x55 0x61 come da specifiche del produttore WitMotion)
 - ✅ Visualizzazione real-time: accelerazione, velocità angolare, angoli
 - ✅ Architettura modulare con protocollo `SensorDataProvider`
