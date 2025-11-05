@@ -96,7 +96,24 @@ class SettingsManager: ObservableObject {
     @Published var repEccentricThreshold: Double {
         didSet { save() }
     }
-    
+
+    // MARK: - ROM Personalizzato
+
+    /// ROM personalizzato (metri) - distanza petto-braccio
+    @Published var customROM: Double {
+        didSet { save() }
+    }
+
+    /// Tolleranza ROM (0.0-1.0, es. 0.30 = ±30%)
+    @Published var customROMTolerance: Double {
+        didSet { save() }
+    }
+
+    /// Abilita validazione ROM personalizzato
+    @Published var useCustomROM: Bool {
+        didSet { save() }
+    }
+
     // MARK: - Ultimo sensore
     @Published var lastConnectedPeripheralID: String? {
         didSet { save() }
@@ -131,6 +148,9 @@ class SettingsManager: ObservableObject {
         static let repEccentricThreshold = "repEccentricThreshold"
         static let repLookAheadMs = "repLookAheadMs"
         static let lastPeripheralID = "lastPeripheralID"
+        static let customROM = "customROM"
+        static let customROMTolerance = "customROMTolerance"
+        static let useCustomROM = "useCustomROM"
     }
     
     // MARK: - Initialization
@@ -190,10 +210,19 @@ class SettingsManager: ObservableObject {
         
         let loadedVelocityMode = UserDefaults.standard.string(forKey: Keys.velocityMode) ?? "concentricOnly"
            velocityMeasurementMode = loadedVelocityMode == "fullROM" ? .fullROM : .concentricOnly
-        
+
+        // ROM Personalizzato
+        let loadedCustomROM = UserDefaults.standard.double(forKey: Keys.customROM)
+        customROM = loadedCustomROM == 0 ? 0.50 : loadedCustomROM  // Default 0.50m (bench press medio)
+
+        let loadedROMTolerance = UserDefaults.standard.double(forKey: Keys.customROMTolerance)
+        customROMTolerance = loadedROMTolerance == 0 ? 0.30 : loadedROMTolerance  // Default 30%
+
+        useCustomROM = UserDefaults.standard.bool(forKey: Keys.useCustomROM)  // Default false
+
         loadLastPeripheralID()
 
-           
+
         print("✅ SettingsManager inizializzato")
     }
     
@@ -233,10 +262,15 @@ class SettingsManager: ObservableObject {
         UserDefaults.standard.set(repLookAheadMs, forKey: Keys.repLookAheadMs)
 
         UserDefaults.standard.set(lastConnectedPeripheralID, forKey: Keys.lastPeripheralID)
-        
+
+        // ROM Personalizzato
+        UserDefaults.standard.set(customROM, forKey: Keys.customROM)
+        UserDefaults.standard.set(customROMTolerance, forKey: Keys.customROMTolerance)
+        UserDefaults.standard.set(useCustomROM, forKey: Keys.useCustomROM)
+
         let modeString = velocityMeasurementMode == .fullROM ? "fullROM" : "concentricOnly"
           UserDefaults.standard.set(modeString, forKey: Keys.velocityMode)
-        
+
     }
     
     private static func loadVelocityRanges() -> VelocityRanges {
@@ -286,6 +320,9 @@ class SettingsManager: ObservableObject {
         repMinAmplitude = 0.45
         repSmoothingWindow = 10
         repEccentricThreshold = 0.15
+        customROM = 0.50
+        customROMTolerance = 0.30
+        useCustomROM = false
 
         print("🔄 Impostazioni resettate ai valori predefiniti")
     }
