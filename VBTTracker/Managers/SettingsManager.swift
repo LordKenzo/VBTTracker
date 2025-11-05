@@ -212,11 +212,17 @@ class SettingsManager: ObservableObject {
            velocityMeasurementMode = loadedVelocityMode == "fullROM" ? .fullROM : .concentricOnly
 
         // ROM Personalizzato
-        let loadedCustomROM = UserDefaults.standard.double(forKey: Keys.customROM)
-        customROM = loadedCustomROM == 0 ? 0.50 : loadedCustomROM  // Default 0.50m (bench press medio)
+        if let loadedCustomROM = UserDefaults.standard.object(forKey: Keys.customROM) as? Double {
+            customROM = loadedCustomROM
+        } else {
+            customROM = 0.50  // Default 0.50m (bench press medio)
+        }
 
-        let loadedROMTolerance = UserDefaults.standard.double(forKey: Keys.customROMTolerance)
-        customROMTolerance = loadedROMTolerance == 0 ? 0.30 : loadedROMTolerance  // Default 30%
+        if let loadedROMTolerance = UserDefaults.standard.object(forKey: Keys.customROMTolerance) as? Double {
+            customROMTolerance = loadedROMTolerance
+        } else {
+            customROMTolerance = 0.30  // Default 30%
+        }
 
         useCustomROM = UserDefaults.standard.bool(forKey: Keys.useCustomROM)  // Default false
 
