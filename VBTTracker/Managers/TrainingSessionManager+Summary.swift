@@ -4,7 +4,7 @@
 //
 //  Extension per esporre dati sessione per summary view
 //
-
+/*
 import Foundation
 
 extension TrainingSessionManager {
@@ -28,3 +28,4 @@ extension TrainingSessionManager {
         )
     }
 }
+*/

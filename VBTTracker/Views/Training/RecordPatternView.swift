@@ -21,6 +21,8 @@ struct RecordPatternView: View {
     @State private var loadPercentage = ""
     @State private var useLoadPercentage = false
     
+    @State private var showDismissAlert = false
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -68,6 +70,20 @@ struct RecordPatternView: View {
             }
             .sheet(isPresented: $showForm) {
                 patternFormSheet
+                    .interactiveDismissDisabled(recorder.state == .readyToSave)
+                    .onAppear {
+                        // Reset alert state
+                        showDismissAlert = false
+                    }
+            }
+            .alert("Annullare registrazione?", isPresented: $showDismissAlert) {
+                Button("Annulla", role: .cancel) { }
+                Button("Conferma", role: .destructive) {
+                    showForm = false
+                    recorder.reset()
+                }
+            } message: {
+                Text("Perderai i dati della registrazione corrente.")
             }
             .onChange(of: recorder.state) { _, newState in
                 if newState == .readyToSave {
@@ -295,8 +311,13 @@ struct RecordPatternView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button("Annulla") {
-                        showForm = false
-                        recorder.reset()
+                        // ✅ Mostra alert se ci sono dati da salvare
+                        if recorder.state == .readyToSave {
+                            showDismissAlert = true
+                        } else {
+                            showForm = false
+                            recorder.reset()
+                        }
                     }
                 }
                 
@@ -306,6 +327,16 @@ struct RecordPatternView: View {
                     }
                     .disabled(patternLabel.isEmpty)
                 }
+            }
+            .alert("Annullare registrazione?", isPresented: $showDismissAlert) {
+                Button("Annulla", role: .cancel) { }
+                Button("Conferma", role: .destructive) {
+                    showForm = false
+                    recorder.reset()
+                    showDismissAlert = false  // ✅ Reset alert state
+                }
+            } message: {
+                Text("Perderai i dati della registrazione corrente.")
             }
         }
     }

@@ -120,7 +120,12 @@ struct HomeView: View {
                 TrainingHistoryView()
             }
             .sheet(isPresented: $showConnectionView) {
-                SensorConnectionView()
+                NavigationStack {
+                    SensorSettingsView(
+                        bleManager: bleManager,
+                        calibrationManager: calibrationManager
+                    )
+                }
             }
         }
     }

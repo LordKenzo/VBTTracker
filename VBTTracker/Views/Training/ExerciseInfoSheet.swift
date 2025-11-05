@@ -18,6 +18,13 @@ struct ExerciseInfoSheet: View {
     // Per ora solo Panca Piana
     private let exerciseName = "Panca Piana"
     
+    init(loadPercentage: Binding<Double?>) {
+        self._loadPercentage = loadPercentage
+        let initial = loadPercentage.wrappedValue
+        _useLoadPercentage = State(initialValue: initial != nil)
+        _tempLoadPercentage = State(initialValue: initial ?? 70.0)
+    }
+    
     var body: some View {
         NavigationStack {
             Form {
