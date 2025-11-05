@@ -88,12 +88,30 @@ struct RepDetectionSettingsView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
+
+                    // Warning per SR bassi
+                    if settings.forceDisplacementGate {
+                        HStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                                .font(.caption)
+                            Text("Con sample rate <40Hz la validazione ROM può bloccare ripetizioni valide (doppia integrazione inaccurata).")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(8)
+                        .background(Color.orange.opacity(0.1))
+                        .cornerRadius(6)
+                    }
                 }
             } header: {
                 Text("Profilo Rilevamento")
             } footer: {
                 if settings.detectionProfile == .generic {
                     Text("Il profilo Generico usa le impostazioni attuali senza modifiche automatiche. Seleziona un profilo specifico per ottimizzazioni automatiche.")
+                } else if settings.detectionProfile == .test {
+                    Text("Il profilo Test/Debug usa soglie molto basse (×0.3 ampiezza, ×0.4 durata) per accettare quasi tutte le ripetizioni. Utile per troubleshooting e testing dell'algoritmo.")
                 } else {
                     Text("Profilo ottimizzato per \(settings.detectionProfile.velocityRange.lowerBound.formatted())-\(settings.detectionProfile.velocityRange.upperBound.formatted()) m/s. Le correzioni compensano limitazioni di sample rate bassi.")
                 }
