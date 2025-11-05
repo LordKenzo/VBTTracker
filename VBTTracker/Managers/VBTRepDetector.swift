@@ -18,9 +18,25 @@ final class VBTRepDetector {
     private let DEBUG_DETECTION = false
 
     // Spostamento (m) minimo/massimo accettato per la fase concentrica
-    // Panca piana tipicamente ~0.30–0.50 m, lasciamo un po’ di margine.
-    private let MIN_CONC_DISPLACEMENT: Double = 0.20   // <— era 0.30
-       private let MAX_CONC_DISPLACEMENT: Double = 0.80
+    // Panca piana tipicamente ~0.30–0.50 m, lasciamo un po' di margine.
+    // Se ROM personalizzato è attivo, usa quei valori invece dei default
+    private var MIN_CONC_DISPLACEMENT: Double {
+        if SettingsManager.shared.useCustomROM {
+            let rom = SettingsManager.shared.customROM
+            let tolerance = SettingsManager.shared.customROMTolerance
+            return rom * (1.0 - tolerance)
+        }
+        return 0.20
+    }
+
+    private var MAX_CONC_DISPLACEMENT: Double {
+        if SettingsManager.shared.useCustomROM {
+            let rom = SettingsManager.shared.customROM
+            let tolerance = SettingsManager.shared.customROMTolerance
+            return rom * (1.0 + tolerance)
+        }
+        return 0.80
+    }
 
     // Valori di sicurezza
     private let DEFAULT_MIN_CONCENTRIC: TimeInterval = 0.45
@@ -268,7 +284,8 @@ final class VBTRepDetector {
                         if let d = disp {
                             dispOK = (MIN_CONC_DISPLACEMENT...MAX_CONC_DISPLACEMENT).contains(d)
                             if DEBUG_DETECTION {
-                                print("📏 disp=\(String(format: "%.2f", d)) m  gate=\(dispOK ? "OK" : "KO")")
+                                let rangeInfo = SettingsManager.shared.useCustomROM ? " [Custom ROM: \(String(format: "%.2f", MIN_CONC_DISPLACEMENT))-\(String(format: "%.2f", MAX_CONC_DISPLACEMENT))m]" : ""
+                                print("📏 disp=\(String(format: "%.2f", d)) m  gate=\(dispOK ? "OK" : "KO")\(rangeInfo)")
                             }
                         } else {
                             dispOK = false
@@ -530,7 +547,11 @@ extension VBTRepDetector {
         print("   • Min Refractory: \(String(format: "%.2f", minRefractory))s")
         print("   • Displacement Gate: \(useDisplacementGate ? "ON" : "OFF")")
         if useDisplacementGate {
-            print("   • Range Displacement: \(MIN_CONC_DISPLACEMENT)-\(MAX_CONC_DISPLACEMENT)m")
+            let romStatus = SettingsManager.shared.useCustomROM ? " (ROM Personalizzato)" : " (Default)"
+            print("   • Range Displacement: \(String(format: "%.2f", MIN_CONC_DISPLACEMENT))-\(String(format: "%.2f", MAX_CONC_DISPLACEMENT))m\(romStatus)")
+            if SettingsManager.shared.useCustomROM {
+                print("   • ROM Base: \(String(format: "%.2f", SettingsManager.shared.customROM))m ±\(Int(SettingsManager.shared.customROMTolerance * 100))%")
+            }
         }
         print("")
         print("🔄 STATO CICLO:")
@@ -615,7 +636,8 @@ extension VBTRepDetector {
             if let d = disp {
                 let inRange = (MIN_CONC_DISPLACEMENT...MAX_CONC_DISPLACEMENT).contains(d)
                 if !inRange {
-                    issues.append("Displacement \(String(format: "%.2f", d))m fuori range [\(MIN_CONC_DISPLACEMENT)-\(MAX_CONC_DISPLACEMENT)]m")
+                    let romType = SettingsManager.shared.useCustomROM ? "ROM personalizzato" : "Default"
+                    issues.append("Displacement \(String(format: "%.2f", d))m fuori range [\(String(format: "%.2f", MIN_CONC_DISPLACEMENT))-\(String(format: "%.2f", MAX_CONC_DISPLACEMENT))]m (\(romType))")
                 }
             }
         }
