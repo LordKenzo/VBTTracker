@@ -474,29 +474,6 @@ extension VBTRepDetector {
             }
         }
     }
-    
-    private static func makeFeatureVector(from samples: [AccelerationSample]) -> [Double] {
-        guard samples.count > 3 else { return [] } // Minimo 3 campioni per calcolare le feature
-
-        // Estrai i valori di accelerazione sull'asse Z
-        let accZ = samples.map(\.accZ)
-
-        // Calcola feature statistiche:
-        let mean = accZ.reduce(0, +) / Double(accZ.count) // Media
-        let std = sqrt(accZ.map { pow($0 - mean, 2) }.reduce(0, +) / Double(accZ.count)) // Deviazione standard
-        let range = (accZ.max() ?? 0) - (accZ.min() ?? 0) // Range
-        let diffs = zip(accZ.dropFirst(), accZ).map { $0 - $1 } // Differenze tra campioni consecutivi
-        let spectralEnergy = sqrt(diffs.map { $0 * $0 }.reduce(0, +) / Double(diffs.count)) // Energia spettrale
-
-        return [
-            mean,
-            std,
-            range / 2.0, // Semi-range
-            spectralEnergy,
-            Double(samples.count) / 100.0 // Normalizzazione per la lunghezza
-        ]
-    }
-
 
     func savePatternSequence(
         label: String,
