@@ -46,9 +46,9 @@ final class VBTRepDetector {
     private let warmupReps = 3
     
     private var useDisplacementGate: Bool {
-        // Forza gate se richiesto dalle impostazioni o dal profilo
-        let forceGate = SettingsManager.shared.forceDisplacementGate ||
-                        SettingsManager.shared.detectionProfile.forceDisplacementGate
+        // Rispetta il toggle dell'utente (controllo finale)
+        // Il valore del profilo è solo un suggerimento per il default
+        let forceGate = SettingsManager.shared.forceDisplacementGate
         return (sampleRateHz >= 60) || forceGate
     }
     private let MIN_CONC_SAMPLES = 8
