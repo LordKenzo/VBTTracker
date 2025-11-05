@@ -133,7 +133,77 @@ struct RepDetectionSettingsView: View {
             } footer: {
                 Text("Numero di campioni per la media mobile e finestra di look-ahead (ritardo in ms per confermare la rep).")
             }
-            
+
+            // MARK: - ROM Personalizzato
+            Section {
+                Toggle(isOn: $settings.useCustomROM) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "ruler")
+                            .foregroundStyle(settings.useCustomROM ? .blue : .secondary)
+                        Text("ROM Personalizzato")
+                    }
+                }
+
+                if settings.useCustomROM {
+                    SliderSettingRow(
+                        title: "ROM (petto-braccio)",
+                        value: $settings.customROM,
+                        range: 0.30...0.80,
+                        step: 0.05,
+                        unit: "m",
+                        description: romDescription
+                    )
+
+                    SliderSettingRow(
+                        title: "Tolleranza",
+                        value: $settings.customROMTolerance,
+                        range: 0.10...0.50,
+                        step: 0.05,
+                        unit: "",
+                        description: toleranceDescription
+                    )
+
+                    // Range calcolato in tempo reale
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "ruler.fill")
+                                .font(.caption)
+                                .foregroundStyle(.green)
+                            Text("Range Accettato:")
+                                .font(.caption)
+                                .fontWeight(.medium)
+                        }
+
+                        HStack {
+                            Text(String(format: "%.2f m", settings.customROM * (1.0 - settings.customROMTolerance)))
+                                .font(.system(.body, design: .monospaced))
+                                .foregroundStyle(.green)
+
+                            Image(systemName: "arrow.left.and.right")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+
+                            Text(String(format: "%.2f m", settings.customROM * (1.0 + settings.customROMTolerance)))
+                                .font(.system(.body, design: .monospaced))
+                                .foregroundStyle(.green)
+                        }
+                        .padding(.leading, 28)
+                    }
+                    .padding(.vertical, 8)
+                    .padding(.horizontal, 12)
+                    .background(Color.green.opacity(0.1))
+                    .cornerRadius(8)
+                }
+            } header: {
+                Text("Validazione ROM")
+            } footer: {
+                if settings.useCustomROM {
+                    Text("Distanza petto-braccio durante bench press. Le ripetizioni verranno conteggiate solo se il displacement rientra nel range ±tolleranza. Attivo solo con frequenza campionamento ≥60Hz.")
+                } else {
+                    Text("Abilita per usare un ROM personalizzato invece del range standard (0.20-0.80m). Utile per adattare la rilevazione alla tua anatomia.")
+                }
+            }
+
             // MARK: - Velocity Thresholds (Legacy - kept for compatibility)
             Section {
                 SliderSettingRow(
@@ -292,6 +362,28 @@ struct RepDetectionSettingsView: View {
         default:     return "🎯 Stabile, ma più lento a reagire"
         }
     }
+
+    private var romDescription: String {
+        if settings.customROM < 0.40 {
+            return "📏 ROM corto - adatto per braccia corte"
+        } else if settings.customROM <= 0.55 {
+            return "✅ ROM medio (bench press standard)"
+        } else {
+            return "📏 ROM lungo - adatto per braccia lunghe"
+        }
+    }
+
+    private var toleranceDescription: String {
+        let percentage = Int(settings.customROMTolerance * 100)
+        if settings.customROMTolerance < 0.20 {
+            return "🎯 Stretta (±\(percentage)%) - solo ROM molto precisi"
+        } else if settings.customROMTolerance <= 0.35 {
+            return "✅ Bilanciata (±\(percentage)%) - consigliata"
+        } else {
+            return "⚠️ Ampia (±\(percentage)%) - accetta variazioni maggiori"
+        }
+    }
+
     // MARK: - Actions
     
     private func resetToDefaults() {
@@ -304,7 +396,10 @@ struct RepDetectionSettingsView: View {
         settings.repMinPeakVelocity = 0.15
         settings.repMinAcceleration = 2.5
         settings.repLookAheadMs = 200
-        
+        settings.customROM = 0.50
+        settings.customROMTolerance = 0.30
+        settings.useCustomROM = false
+
         print("🔄 Parametri rilevamento ripristinati ai valori predefiniti")
     }
 }
