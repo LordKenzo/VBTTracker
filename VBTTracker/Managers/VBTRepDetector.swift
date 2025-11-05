@@ -441,6 +441,18 @@ final class VBTRepDetector {
         }
         let disp = x.last ?? 0.0 // m
 
+        // Debug: log valori prima del check finale
+        if DEBUG_DETECTION || mpv < 0.05 || ppv < 0.05 {
+            print("🔍 VBT Calc Debug:")
+            print("   Samples: \(src.count), vConc: \(vConc.count)")
+            print("   MPV raw: \(String(format: "%.4f", mpv)) m/s")
+            print("   PPV raw: \(String(format: "%.4f", ppv)) m/s")
+            print("   Disp: \(String(format: "%.3f", disp)) m")
+            print("   Range check: MPV \((0.05...MAX_MPV).contains(mpv) ? "✅" : "❌"), PPV \((0.05...MAX_PPV).contains(ppv) ? "✅" : "❌")")
+            if mpv < 0.05 { print("   ⚠️ MPV sotto soglia 0.05 m/s → ritorna nil") }
+            if ppv < 0.05 { print("   ⚠️ PPV sotto soglia 0.05 m/s → ritorna nil") }
+        }
+
         return ((0.05...MAX_MPV).contains(mpv) ? mpv : nil,
                 (0.05...MAX_PPV).contains(ppv) ? ppv : nil,
                 abs(disp))

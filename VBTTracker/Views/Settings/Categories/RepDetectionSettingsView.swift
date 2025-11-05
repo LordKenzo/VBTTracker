@@ -88,6 +88,22 @@ struct RepDetectionSettingsView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
+
+                    // Warning per SR bassi
+                    if settings.forceDisplacementGate {
+                        HStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                                .font(.caption)
+                            Text("Con sample rate <40Hz la validazione ROM può bloccare ripetizioni valide (doppia integrazione inaccurata).")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(8)
+                        .background(Color.orange.opacity(0.1))
+                        .cornerRadius(6)
+                    }
                 }
             } header: {
                 Text("Profilo Rilevamento")

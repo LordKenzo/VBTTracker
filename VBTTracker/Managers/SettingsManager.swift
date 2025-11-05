@@ -597,12 +597,14 @@ enum DetectionProfile: String, CaseIterable, Codable {
     }
 
     // Forza displacement gate anche sotto 60Hz?
+    // NOTA: Con SR <40Hz la doppia integrazione è troppo inaccurata
+    // Il displacement gate va abilitato solo manualmente dall'utente
     var forceDisplacementGate: Bool {
         switch self {
         case .generic: return false
-        case .maxStrength: return true     // OK anche SR basso (movimenti lenti)
-        case .strength: return true        // OK anche SR basso
-        case .strengthSpeed: return true   // Può funzionare con SR ~30Hz
+        case .maxStrength: return false    // Troppo inaccurato con SR bassi
+        case .strength: return false       // Troppo inaccurato con SR bassi
+        case .strengthSpeed: return false  // Troppo inaccurato con SR bassi
         case .speed: return false          // Richiede SR alto
         case .maxSpeed: return false       // Richiede SR molto alto
         }
