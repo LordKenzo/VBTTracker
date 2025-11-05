@@ -41,7 +41,64 @@ struct RepDetectionSettingsView: View {
                 }
                 .padding(.vertical, 4)
             }
-            
+
+            // MARK: - Detection Profile
+            Section {
+                Picker("Profilo", selection: $settings.detectionProfile) {
+                    ForEach(DetectionProfile.allCases, id: \.self) { profile in
+                        HStack {
+                            Image(systemName: profile.icon)
+                            Text(profile.displayName)
+                        }
+                        .tag(profile)
+                    }
+                }
+                .pickerStyle(.navigationLink)
+
+                // Descrizione profilo selezionato
+                HStack(spacing: 8) {
+                    Image(systemName: settings.detectionProfile.icon)
+                        .foregroundStyle(settings.detectionProfile.color)
+                        .font(.title3)
+                    Text(settings.detectionProfile.description)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.vertical, 4)
+
+                // Toggle correzioni avanzate
+                if settings.detectionProfile != .generic {
+                    Toggle(isOn: $settings.enableVelocityCorrection) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Correzione Velocità")
+                                .font(.body)
+                            Text("Applica fattore ×\(String(format: "%.1f", settings.detectionProfile.velocityCorrectionFactor)) a MPV/PPV")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    Toggle(isOn: $settings.forceDisplacementGate) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Forza Displacement Gate")
+                                .font(.body)
+                            Text("Abilita validazione ROM anche sotto 60Hz")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            } header: {
+                Text("Profilo Rilevamento")
+            } footer: {
+                if settings.detectionProfile == .generic {
+                    Text("Il profilo Generico usa le impostazioni attuali senza modifiche automatiche. Seleziona un profilo specifico per ottimizzazioni automatiche.")
+                } else {
+                    Text("Profilo ottimizzato per \(settings.detectionProfile.velocityRange.lowerBound.formatted())-\(settings.detectionProfile.velocityRange.upperBound.formatted()) m/s. Le correzioni compensano limitazioni di sample rate bassi.")
+                }
+            }
+
             // MARK: - Timing Parameters
             Section {
                 SliderSettingRow(

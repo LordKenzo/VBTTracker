@@ -45,7 +45,12 @@ final class VBTRepDetector {
     private let MAX_PPV = 3.0
     private let warmupReps = 3
     
-    private var useDisplacementGate: Bool { sampleRateHz >= 60 }
+    private var useDisplacementGate: Bool {
+        // Forza gate se richiesto dalle impostazioni o dal profilo
+        let forceGate = SettingsManager.shared.forceDisplacementGate ||
+                        SettingsManager.shared.detectionProfile.forceDisplacementGate
+        return (sampleRateHz >= 60) || forceGate
+    }
     private let MIN_CONC_SAMPLES = 8
 
     // MARK: - Public config
@@ -75,7 +80,11 @@ final class VBTRepDetector {
     private func minConcentricDurationSec() -> TimeInterval {
         if DEBUG_DETECTION { return 0.30 }
         let fromPattern = learnedPattern.map { max(0.50, $0.avgConcentricDuration * 0.8) } ?? max(0.50, DEFAULT_MIN_CONCENTRIC)
-        return lowSRSafeMode ? max(0.35, fromPattern * 0.85) : fromPattern  // NEW
+        let baseDuration = lowSRSafeMode ? max(0.35, fromPattern * 0.85) : fromPattern
+
+        // Applica moltiplicatore del profilo
+        let profile = SettingsManager.shared.detectionProfile
+        return baseDuration * profile.durationMultiplier
     }
 
     private var minAmplitude: Double {
@@ -89,7 +98,11 @@ final class VBTRepDetector {
         } else {
             base = 0.25
         }
-        return lowSRSafeMode ? max(0.15, base * 0.8) : base  // NEW
+        let adjusted = lowSRSafeMode ? max(0.15, base * 0.8) : base
+
+        // Applica moltiplicatore del profilo
+        let profile = SettingsManager.shared.detectionProfile
+        return adjusted * profile.amplitudeMultiplier
     }
 
     private var idleThreshold: Double {
@@ -388,8 +401,16 @@ final class VBTRepDetector {
         guard !vConc.isEmpty else { return (nil, nil, nil) }
 
         // 5) MPV/PPV
-        let mpv = vConc.reduce(0, +) / Double(vConc.count)
-        let ppv = vConc.max() ?? 0
+        var mpv = vConc.reduce(0, +) / Double(vConc.count)
+        var ppv = vConc.max() ?? 0
+
+        // Applica correzione velocità se abilitata
+        if SettingsManager.shared.enableVelocityCorrection {
+            let profile = SettingsManager.shared.detectionProfile
+            let correctionFactor = profile.velocityCorrectionFactor
+            mpv *= correctionFactor
+            ppv *= correctionFactor
+        }
 
         // 6) Spostamento durante la fase concentrica: integra v
         var x = [0.0]
@@ -539,6 +560,17 @@ extension VBTRepDetector {
         print("📊 Sample Rate: \(String(format: "%.1f", sampleRateHz)) Hz")
         print("👀 Look-ahead: \(lookAheadSamples) samples (\(String(format: "%.0f", Double(lookAheadSamples)/sampleRateHz*1000))ms)")
         print("📏 Buffer: \(samples.count) samples, \(smoothedValues.count) smoothed")
+        print("")
+        print("🎯 PROFILO: \(SettingsManager.shared.detectionProfile.displayName)")
+        if SettingsManager.shared.enableVelocityCorrection {
+            let factor = SettingsManager.shared.detectionProfile.velocityCorrectionFactor
+            print("   • Correzione Velocità: ON (×\(String(format: "%.1f", factor)))")
+        } else {
+            print("   • Correzione Velocità: OFF")
+        }
+        if SettingsManager.shared.forceDisplacementGate {
+            print("   • Displacement Gate Forzato: ON")
+        }
         print("")
         print("🎯 SOGLIE ATTIVE:")
         print("   • Min Amplitude: \(String(format: "%.3f", minAmplitude))g")

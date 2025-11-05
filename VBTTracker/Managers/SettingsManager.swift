@@ -114,6 +114,23 @@ class SettingsManager: ObservableObject {
         didSet { save() }
     }
 
+    // MARK: - Profili Rilevamento
+
+    /// Profilo di rilevamento selezionato
+    @Published var detectionProfile: DetectionProfile {
+        didSet { save() }
+    }
+
+    /// Abilita correzioni velocità per sample rate bassi
+    @Published var enableVelocityCorrection: Bool {
+        didSet { save() }
+    }
+
+    /// Forza displacement gate anche sotto 60Hz
+    @Published var forceDisplacementGate: Bool {
+        didSet { save() }
+    }
+
     // MARK: - Ultimo sensore
     @Published var lastConnectedPeripheralID: String? {
         didSet { save() }
@@ -151,6 +168,9 @@ class SettingsManager: ObservableObject {
         static let customROM = "customROM"
         static let customROMTolerance = "customROMTolerance"
         static let useCustomROM = "useCustomROM"
+        static let detectionProfile = "detectionProfile"
+        static let enableVelocityCorrection = "enableVelocityCorrection"
+        static let forceDisplacementGate = "forceDisplacementGate"
     }
     
     // MARK: - Initialization
@@ -226,6 +246,13 @@ class SettingsManager: ObservableObject {
 
         useCustomROM = UserDefaults.standard.bool(forKey: Keys.useCustomROM)  // Default false
 
+        // Profili Rilevamento
+        let loadedProfileRaw = UserDefaults.standard.string(forKey: Keys.detectionProfile) ?? "generic"
+        detectionProfile = DetectionProfile(rawValue: loadedProfileRaw) ?? .generic
+
+        enableVelocityCorrection = UserDefaults.standard.object(forKey: Keys.enableVelocityCorrection) as? Bool ?? false
+        forceDisplacementGate = UserDefaults.standard.object(forKey: Keys.forceDisplacementGate) as? Bool ?? false
+
         loadLastPeripheralID()
 
 
@@ -273,6 +300,11 @@ class SettingsManager: ObservableObject {
         UserDefaults.standard.set(customROM, forKey: Keys.customROM)
         UserDefaults.standard.set(customROMTolerance, forKey: Keys.customROMTolerance)
         UserDefaults.standard.set(useCustomROM, forKey: Keys.useCustomROM)
+
+        // Profili Rilevamento
+        UserDefaults.standard.set(detectionProfile.rawValue, forKey: Keys.detectionProfile)
+        UserDefaults.standard.set(enableVelocityCorrection, forKey: Keys.enableVelocityCorrection)
+        UserDefaults.standard.set(forceDisplacementGate, forKey: Keys.forceDisplacementGate)
 
         let modeString = velocityMeasurementMode == .fullROM ? "fullROM" : "concentricOnly"
           UserDefaults.standard.set(modeString, forKey: Keys.velocityMode)
@@ -329,6 +361,9 @@ class SettingsManager: ObservableObject {
         customROM = 0.50
         customROMTolerance = 0.30
         useCustomROM = false
+        detectionProfile = .generic
+        enableVelocityCorrection = false
+        forceDisplacementGate = false
 
         print("🔄 Impostazioni resettate ai valori predefiniti")
     }
@@ -452,5 +487,150 @@ enum TrainingZone: String, CaseIterable {
         case .maxSpeed: return ">1.00 m/s - Velocità massima"
         }
     }
-    
 }
+
+// MARK: - Detection Profile
+
+enum DetectionProfile: String, CaseIterable, Codable {
+    case generic = "generic"
+    case maxStrength = "maxStrength"
+    case strength = "strength"
+    case strengthSpeed = "strengthSpeed"
+    case speed = "speed"
+    case maxSpeed = "maxSpeed"
+
+    var displayName: String {
+        switch self {
+        case .generic: return "Generico"
+        case .maxStrength: return "Forza Massima"
+        case .strength: return "Forza"
+        case .strengthSpeed: return "Forza-Velocità"
+        case .speed: return "Velocità"
+        case .maxSpeed: return "Velocità Massima"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .generic: return "gearshape"
+        case .maxStrength: return "hammer.fill"
+        case .strength: return "dumbbell.fill"
+        case .strengthSpeed: return "bolt.fill"
+        case .speed: return "hare.fill"
+        case .maxSpeed: return "bolt.circle.fill"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .generic: return .gray
+        case .maxStrength: return .red
+        case .strength: return .orange
+        case .strengthSpeed: return .yellow
+        case .speed: return .green
+        case .maxSpeed: return .blue
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .generic:
+            return "Usa le impostazioni attuali senza modifiche. Ideale per personalizzazione manuale."
+        case .maxStrength:
+            return "Ottimizzato per carichi massimali (0.15-0.30 m/s). Movimenti lenti e controllati."
+        case .strength:
+            return "Ottimizzato per sviluppo forza (0.30-0.50 m/s). Leggere correzioni velocità."
+        case .strengthSpeed:
+            return "Ottimizzato per potenza (0.50-0.75 m/s). Correzioni medie, richiede SR ≥30Hz."
+        case .speed:
+            return "Ottimizzato per velocità esplosiva (0.75-1.00 m/s). Correzioni forti, richiede SR ≥40Hz."
+        case .maxSpeed:
+            return "Ottimizzato per velocità massima (>1.00 m/s). Correzioni molto forti, richiede SR ≥50Hz."
+        }
+    }
+
+    var velocityRange: ClosedRange<Double> {
+        switch self {
+        case .generic: return 0.0...2.0
+        case .maxStrength: return 0.15...0.30
+        case .strength: return 0.30...0.50
+        case .strengthSpeed: return 0.50...0.75
+        case .speed: return 0.75...1.00
+        case .maxSpeed: return 1.00...2.00
+        }
+    }
+
+    // Fattore di correzione velocità per sample rate bassi
+    var velocityCorrectionFactor: Double {
+        switch self {
+        case .generic: return 1.0          // Nessuna correzione
+        case .maxStrength: return 1.0      // Non necessaria (movimenti lenti)
+        case .strength: return 1.2         // Correzione leggera (+20%)
+        case .strengthSpeed: return 1.5    // Correzione media (+50%)
+        case .speed: return 2.0            // Correzione forte (+100%)
+        case .maxSpeed: return 2.5         // Correzione molto forte (+150%)
+        }
+    }
+
+    // Moltiplicatore per soglia ampiezza minima
+    var amplitudeMultiplier: Double {
+        switch self {
+        case .generic: return 1.0
+        case .maxStrength: return 1.2      // Più alta (movimenti lenti = più ampi)
+        case .strength: return 1.0         // Standard
+        case .strengthSpeed: return 0.85   // Leggermente più bassa
+        case .speed: return 0.7            // Più bassa (movimenti veloci = meno ampi)
+        case .maxSpeed: return 0.6         // Molto più bassa
+        }
+    }
+
+    // Moltiplicatore per durata minima concentrica
+    var durationMultiplier: Double {
+        switch self {
+        case .generic: return 1.0
+        case .maxStrength: return 1.3      // Più lunga (movimenti lenti)
+        case .strength: return 1.1
+        case .strengthSpeed: return 0.9
+        case .speed: return 0.7            // Più breve (movimenti veloci)
+        case .maxSpeed: return 0.5         // Molto più breve
+        }
+    }
+
+    // Forza displacement gate anche sotto 60Hz?
+    var forceDisplacementGate: Bool {
+        switch self {
+        case .generic: return false
+        case .maxStrength: return true     // OK anche SR basso (movimenti lenti)
+        case .strength: return true        // OK anche SR basso
+        case .strengthSpeed: return true   // Può funzionare con SR ~30Hz
+        case .speed: return false          // Richiede SR alto
+        case .maxSpeed: return false       // Richiede SR molto alto
+        }
+    }
+
+    // Sample rate minimo raccomandato
+    var minimumRecommendedSR: Double {
+        switch self {
+        case .generic: return 20.0
+        case .maxStrength: return 20.0
+        case .strength: return 25.0
+        case .strengthSpeed: return 30.0
+        case .speed: return 40.0
+        case .maxSpeed: return 50.0
+        }
+    }
+
+    // Badge per UI - indica se il profilo è adatto al SR attuale
+    func badge(for sampleRate: Double) -> String? {
+        if sampleRate < minimumRecommendedSR {
+            return "⚠️ SR Basso"
+        } else if sampleRate >= 60 {
+            return "✅ Ottimale"
+        } else if sampleRate >= minimumRecommendedSR * 1.2 {
+            return "✅ Buono"
+        } else {
+            return nil
+        }
+    }
+}
+
