@@ -26,6 +26,7 @@ struct SettingsView: View {
     @ObservedObject var bleManager: BLEManager
     @ObservedObject var calibrationManager: CalibrationManager
     @ObservedObject var settings = SettingsManager.shared
+    @ObservedObject private var patternLibrary = LearnedPatternLibrary.shared
     
     // ✅ CORREZIONE: @ObservedObject per aggiornamento real-time
     @ObservedObject private var patternLibrary = LearnedPatternLibrary.shared

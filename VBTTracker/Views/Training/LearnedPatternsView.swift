@@ -1,12 +1,4 @@
 //
-//  LearnedPatternsView 2.swift
-//  VBTTracker
-//
-//  Created by Lorenzo Franceschini on 31/10/25.
-//
-
-
-//
 //  LearnedPatternsView.swift
 //  VBTTracker
 //
