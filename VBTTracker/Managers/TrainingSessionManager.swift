@@ -187,7 +187,7 @@ class TrainingSessionManager: ObservableObject {
         
         // 1) Ottieni accelerazione Z (verticale) e togli la gravità (coerente con il detector)
         let accZ = acceleration[2]
-        let accZNoGravity = accZ   // se Z è verso l’alto; inverti segno se necessario
+        let accZNoGravity = accZ - 1.0  // Rimuove la gravità (1.0g) -> fermo = 0g
 
         
         repDetector.velocityMode = SettingsManager.shared.velocityMeasurementMode
