@@ -2,7 +2,7 @@
 //  TrainingSessionManager.swift
 //  VBTTracker
 //
-//  ✅ AGGIORNATO: Gestisce MPV e PPV separatamente secondo standard VBT
+//  AGGIORNATO: Gestisce MPV/PPV + look-ahead sincronizzato con Settings
 //
 
 import Foundation
@@ -15,7 +15,7 @@ class TrainingSessionManager: ObservableObject {
     @Published var isRecording = false
     @Published var currentVelocity: Double = 0.0
     
-    // ✅ NUOVO: Velocità separate secondo standard VBT
+    // Velocità separate secondo standard VBT
     @Published var meanPropulsiveVelocity: Double = 0.0   // MPV corrente
     @Published var peakPropulsiveVelocity: Double = 0.0   // PPV corrente
     
@@ -30,9 +30,38 @@ class TrainingSessionManager: ObservableObject {
     @Published var lastRepInTarget: Bool = true
     @Published var lastRepPeakVelocity: Double = 0.0
     
-    // ✅ NUOVO: Tracking separato MPV ultima rep
+    // Tracking separato MPV ultima rep
     @Published var lastRepMPV: Double = 0.0
     @Published var lastRepPPV: Double = 0.0
+    
+    // MARK: - Sample rate / Look-ahead
+    
+    /// Frequenza di campionamento del sensore (Hz). Aggiornala da fuori (TrainingSessionView) leggendo dal BLE.
+    var sampleRateHz: Double = 200.0 {
+        didSet {
+            // Debounce: max 1 chiamata al secondo
+            let now = Date()
+            if now.timeIntervalSince(lastConfigTime) > 1.0 {
+                lastConfigTime = now
+                configureLookAhead()
+            }
+        }
+    }
+    
+    // Track ultima configurazione per debounce
+    private var lastConfigTime: Date = .distantPast
+
+    /// Numero di campioni di look-ahead per il rilevamento rep (derivato da Settings + sampleRateHz)
+    private var lookAheadSamples: Int {
+        let seconds = SettingsManager.shared.repLookAheadMs / 1000.0
+        let n = Int(round(seconds * sampleRateHz))
+        return min(max(n, 10), 80) // clamp a 10-80 campioni (~0.05-0.4 s @200 Hz)
+    }
+    
+    /// Comodo setter da chiamare dalla View
+    func setSampleRateHz(_ hz: Double) {
+        self.sampleRateHz = hz
+    }
     
     var targetZone: TrainingZone = .strength
     
@@ -50,20 +79,19 @@ class TrainingSessionManager: ObservableObject {
     private var lastRepTime: Date?
     private var movementStartTime: Date?
     
-    // ✅ NUOVO: Storage separato per MPV e PPV
+    // Storage MPV/PPV per rep
     var repMeanPropulsiveVelocities: [Double] = []  // MPV per ogni rep
     var repPeakPropulsiveVelocities: [Double] = []  // PPV per ogni rep
     
-    // Legacy storage (mantiene PPV per retrocompatibilità)
+    // Legacy storage (mantiene PPV per retrocompatibilita)
     var repPeakVelocities: [Double] = []
     var firstRepPeakVelocity: Double?
     
-    // ✅ NUOVO: Prima rep MPV per calcolo velocity loss
+    // Prima rep per calcolo velocity loss
     var firstRepMPV: Double?
     var firstRepPPV: Double?
     
-    // Constants
-    private let dt: Double = 0.02 // 20ms sampling
+    private var cancellables = Set<AnyCancellable>()
     
     enum MovementPhase {
         case idle
@@ -71,57 +99,79 @@ class TrainingSessionManager: ObservableObject {
         case eccentric
     }
     
+    // MARK: - Init
+    
+    init() {
+        // Reagisci ai cambi del look-ahead nei Settings (senza riavvio)
+        SettingsManager.shared.$repLookAheadMs
+            .sink { [weak self] _ in self?.configureLookAhead() }
+            .store(in: &cancellables)
+        
+        // Config iniziale
+        configureLookAhead()
+    }
+    
+    // MARK: - Config
+    
+    /// Centralizza la configurazione dipendente da sampleRate/look-ahead
+    private func configureLookAhead() {
+        let hz = max(5.0, min(sampleRateHz, 200.0))
+        let la = lookAheadSamples
+
+        // passa i parametri al detector (se li usa)
+        repDetector.sampleRateHz = hz
+        repDetector.lookAheadSamples = la
+    }
+    
     // MARK: - Public Methods
     
     func startRecording() {
         isRecording = true
         resetMetrics()
+        configureLookAhead()
         
-        // ✅ Logga pattern appreso se disponibile
+        // Logga pattern appreso se disponibile
         if let pattern = repDetector.learnedPattern {
-            print("🎓 Pattern appreso caricato:")
-            print("   • ROM: \(String(format: "%.0f", pattern.estimatedROM * 100))cm")
-            print("   • Soglia min: \(String(format: "%.2f", pattern.dynamicMinAmplitude))g")
-            print("   • Velocità media: \(String(format: "%.2f", pattern.avgPeakVelocity)) m/s")
+            print("Pattern appreso caricato:")
+            print("ROM: \(String(format: "%.0f", pattern.estimatedROM * 100))cm")
+            print("Soglia min: \(String(format: "%.2f", pattern.dynamicMinAmplitude))g")
+            print("Velocità media: \(String(format: "%.2f", pattern.avgPeakVelocity)) m/s")
         } else {
-            print("⚠️ Nessun pattern appreso - Usando soglie adaptive")
+            print("Nessun pattern appreso - Usando soglie adaptive")
         }
         
-        // Setup voice feedback callback
+        // 🔊 Callback: annuncia lo "Stacco" (unrack) una volta
+        repDetector.onUnrack = { [weak self] in
+            self?.voiceFeedback.announceBarUnrack()
+        }
+
+        // Callback di fase (opzionale: lascia vuoto "stacco" qui)
         repDetector.onPhaseChange = { [weak self] phase in
-            guard let self = self else { return }
-            
+            guard let self else { return }
             DispatchQueue.main.async {
                 switch phase {
                 case .descending:
-                    if self.repCount == 0 && !self.repDetector.hasAnnouncedUnrack {
-                        self.voiceFeedback.announceBarUnrack()
-                    }
-                    
-                case .ascending:
-                    break
-                    
-                case .idle, .completed:
+                    self.currentZone = .strength  // o un log provvisorio
+                case .ascending, .idle, .completed:
                     break
                 }
             }
         }
         
         voiceFeedback.announceWorkoutStart()
-        print("▶️ Sessione allenamento iniziata - Target: \(targetZone.rawValue)")
-        print("📊 Modalità velocità: \(SettingsManager.shared.velocityMeasurementMode == .concentricOnly ? "Concentrica (Standard VBT)" : "Full ROM")")
+        print("Sessione allenamento iniziata - Target: \(targetZone.rawValue)")
+        print("Modalità velocità: \(SettingsManager.shared.velocityMeasurementMode == .concentricOnly ? "Concentrica (Standard VBT)" : "Full ROM")")
+        print("Look-ahead attivo: \(Int(SettingsManager.shared.repLookAheadMs)) ms \(lookAheadSamples) campioni")
     }
 
     func stopRecording() {
         isRecording = false
         calculateFinalMetrics()
-        
-        // Annuncia fine
         voiceFeedback.announceWorkoutEnd(reps: repCount)
         
-        print("⏹️ Sessione terminata - Reps: \(repCount)")
-        print("   • MPV medio: \(String(format: "%.3f", meanVelocity)) m/s")
-        print("   • Velocity Loss: \(String(format: "%.1f", velocityLoss))%")
+        print("Sessione terminata - Reps: \(repCount)")
+        print("• MPV medio: \(String(format: "%.3f", meanVelocity)) m/s")
+        print("• Velocity Loss: \(String(format: "%.1f", velocityLoss))%")
     }
 
     func processSensorData(
@@ -132,37 +182,26 @@ class TrainingSessionManager: ObservableObject {
     ) {
         guard isRecording else { return }
         
-        // 1. Ottieni accelerazione Z (verticale)
-        let accX = acceleration[0]
-        let accY = acceleration[1]
+        // 1) Ottieni accelerazione Z (verticale) e togli la gravità (coerente con il detector)
+        guard acceleration.count >= 3 else { return }
         let accZ = acceleration[2]
-        
-        let accZNoGravity = isCalibrated ? accZ : (accZ - 1.0)
-        
-        // 2. Passa modalità velocità al detector
+        let accZNoGravity = accZ   // se Z è verso l’alto; inverti segno se necessario
+
+        // 2) Passa modalità velocità al detector
         repDetector.velocityMode = SettingsManager.shared.velocityMeasurementMode
         
-        // 3. Rileva rep
-        let result = repDetector.addMultiAxisSample(
-            accX: accX,
-            accY: accY,
-            accZ: accZNoGravity,
-            gyro: angularVelocity,
-            timestamp: Date()
-        )
+        // 3) Rileva rep (nuova API)
+        let result = repDetector.addSample(accZ: accZNoGravity, timestamp: Date())
         
-        // 4. ✅ NUOVO: Elabora risultato con MPV e PPV
+        // 4) Elabora risultato con MPV e PPV
         if result.repDetected {
-            // Estrai velocità (con fallback a legacy)
             let mpv = result.meanPropulsiveVelocity ?? result.peakVelocity ?? 0.0
             let ppv = result.peakPropulsiveVelocity ?? result.peakVelocity ?? 0.0
-            
             countRep(mpv: mpv, ppv: ppv)
         }
         
-        // 5. AGGIORNA ZONA CORRENTE
+        // 5) Aggiorna zona e velocità correnti
         DispatchQueue.main.async {
-            // Usa MPV per determinare zona (standard VBT)
             let velocityForZone = self.meanPropulsiveVelocity > 0.1 ?
                 self.meanPropulsiveVelocity : self.peakPropulsiveVelocity
             
@@ -170,33 +209,39 @@ class TrainingSessionManager: ObservableObject {
                 self.currentZone = SettingsManager.shared.getTrainingZone(for: velocityForZone)
             }
             
-            // Aggiorna currentVelocity con valore smoothed
-            self.currentVelocity = abs(result.currentValue) * 9.81 // g → m/s²
+            self.currentVelocity = abs(result.currentValue) * 9.81 // da g a m/s^2
             
-            // ✅ Aggiorna MPV e PPV durante la rep
             if let mpv = result.meanPropulsiveVelocity, mpv > self.meanPropulsiveVelocity {
                 self.meanPropulsiveVelocity = mpv
             }
-            
             if let ppv = result.peakPropulsiveVelocity, ppv > self.peakPropulsiveVelocity {
                 self.peakPropulsiveVelocity = ppv
             }
-            
-            // Legacy: usa PPV come peakVelocity
-            self.peakVelocity = self.peakPropulsiveVelocity
+            self.peakVelocity = self.peakPropulsiveVelocity // legacy
         }
     }
+
+    // MARK: - Public Helpers
     
-    // MARK: - Public Methods
-    
-    /// Ottieni campioni accelerazione per il grafico
     func getAccelerationSamples() -> [AccelerationSample] {
         return repDetector.getSamples()
     }
     
+    func averageMPV() -> Double {
+        guard !repMeanPropulsiveVelocities.isEmpty else { return 0 }
+        return repMeanPropulsiveVelocities.reduce(0, +) / Double(repMeanPropulsiveVelocities.count)
+    }
+    func averagePPV() -> Double {
+        guard !repPeakPropulsiveVelocities.isEmpty else { return 0 }
+        return repPeakPropulsiveVelocities.reduce(0, +) / Double(repPeakPropulsiveVelocities.count)
+    }
+    
+    func getRepPeakVelocities() -> [Double] {
+        return repPeakVelocities
+    }
+    
     // MARK: - Private Methods
     
-    /// ✅ AGGIORNATO: Conta rep con MPV e PPV separate
     private func countRep(mpv: Double, ppv: Double) {
         // Store MPV e PPV
         repMeanPropulsiveVelocities.append(mpv)
@@ -218,7 +263,7 @@ class TrainingSessionManager: ObservableObject {
         DispatchQueue.main.async {
             self.repCount += 1
             
-            // ✅ Aggiorna metriche separate
+            // Aggiorna metriche separate
             self.lastRepMPV = mpv
             self.lastRepPPV = ppv
             self.lastRepPeakVelocity = ppv  // Legacy
@@ -242,14 +287,20 @@ class TrainingSessionManager: ObservableObject {
             }
         }
         
-        let emoji = isInTarget ? "✅" : "⚠️"
+        let emoji = isInTarget ? "✅" : "❌"
         print("\(emoji) RIPETIZIONE #\(repCount + 1) completata")
         print("   • MPV: \(String(format: "%.3f", mpv)) m/s")
         print("   • PPV: \(String(format: "%.3f", ppv)) m/s")
         print("   • Target: \(isInTarget ? "IN TARGET" : "FUORI TARGET")")
+        
+        // Runtime pattern recognition dopo 3-5 reps
+        let newRepCount = repCount + 1
+        if newRepCount == 3 || newRepCount == 5 {
+            print("Analizzando pattern dopo \(newRepCount) reps...")
+            repDetector.recognizePatternIfPossible()
+        }
     }
     
-    // Helper method
     private func checkIfInTarget(velocity: Double) -> Bool {
         let targetRange = getRangeForTargetZone()
         return targetRange.contains(velocity)
@@ -258,28 +309,22 @@ class TrainingSessionManager: ObservableObject {
     private func getRangeForTargetZone() -> ClosedRange<Double> {
         let ranges = SettingsManager.shared.velocityRanges
         switch targetZone {
-        case .maxStrength:
-            return ranges.maxStrength
-        case .strength:
-            return ranges.strength
-        case .strengthSpeed:
-            return ranges.strengthSpeed
-        case .speed:
-            return ranges.speed
-        case .maxSpeed:
-            return ranges.maxSpeed
-        case .tooSlow:
-            return 0.0...0.15
+        case .maxStrength:   return ranges.maxStrength
+        case .strength:      return ranges.strength
+        case .strengthSpeed: return ranges.strengthSpeed
+        case .speed:         return ranges.speed
+        case .maxSpeed:      return ranges.maxSpeed
+        case .tooSlow:       return 0.0...0.15
         }
     }
     
-    /// ✅ AGGIORNATO: Usa MPV per calcolo media (standard VBT)
+    /// Usa MPV per calcolo media (standard VBT)
     private func calculateMeanVelocity() {
         guard !repMeanPropulsiveVelocities.isEmpty else { return }
         meanVelocity = repMeanPropulsiveVelocities.reduce(0, +) / Double(repMeanPropulsiveVelocities.count)
     }
     
-    /// ✅ AGGIORNATO: Usa MPV per velocity loss (standard VBT)
+    /// Usa MPV per velocity loss (standard VBT)
     private func calculateVelocityLoss() {
         guard let firstMPV = firstRepMPV,
               let lastMPV = repMeanPropulsiveVelocities.last,
@@ -289,26 +334,25 @@ class TrainingSessionManager: ObservableObject {
         }
         
         let loss = ((firstMPV - lastMPV) / firstMPV) * 100.0
-        velocityLoss = max(0, loss) // Ensure non-negative
+        velocityLoss = max(0, loss)
     }
     
     private func calculateFinalMetrics() {
         calculateMeanVelocity()
         calculateVelocityLoss()
         
-        print("📊 Metriche finali:")
-        print("   - Ripetizioni: \(repCount)")
-        print("   - MPV Medio: \(String(format: "%.3f", meanVelocity)) m/s")
-        print("   - Velocity Loss: \(String(format: "%.1f", velocityLoss))%")
+        print("Metriche finali:")
+        print("• Ripetizioni: \(repCount)")
+        print("• MPV Medio: \(String(format: "%.3f", meanVelocity)) m/s")
+        print("• Velocity Loss: \(String(format: "%.1f", velocityLoss))%")
         
         if let firstMPV = firstRepMPV, let lastMPV = repMeanPropulsiveVelocities.last {
-            print("   - Prima rep MPV: \(String(format: "%.3f", firstMPV)) m/s")
-            print("   - Ultima rep MPV: \(String(format: "%.3f", lastMPV)) m/s")
+            print("• Prima rep MPV: \(String(format: "%.3f", firstMPV)) m/s")
+            print("• Ultima rep MPV: \(String(format: "%.3f", lastMPV)) m/s")
         }
-        
         if let firstPPV = firstRepPPV, let lastPPV = repPeakPropulsiveVelocities.last {
-            print("   - Prima rep PPV: \(String(format: "%.3f", firstPPV)) m/s")
-            print("   - Ultima rep PPV: \(String(format: "%.3f", lastPPV)) m/s")
+            print("• Prima rep PPV: \(String(format: "%.3f", firstPPV)) m/s")
+            print("• Ultima rep PPV: \(String(format: "%.3f", lastPPV)) m/s")
         }
     }
     
@@ -316,7 +360,7 @@ class TrainingSessionManager: ObservableObject {
         velocity = 0.0
         currentVelocity = 0.0
         
-        // ✅ Reset velocità separate
+        // Reset velocità separate
         meanPropulsiveVelocity = 0.0
         peakPropulsiveVelocity = 0.0
         
@@ -333,7 +377,7 @@ class TrainingSessionManager: ObservableObject {
         lastRepTime = nil
         movementStartTime = nil
         
-        // ✅ Reset storage separate
+        // Reset storage separate
         repMeanPropulsiveVelocities.removeAll()
         repPeakPropulsiveVelocities.removeAll()
         firstRepMPV = nil
@@ -344,7 +388,7 @@ class TrainingSessionManager: ObservableObject {
         firstRepPeakVelocity = nil
         currentZone = .tooSlow
         
-        // ✅ Reset ultima rep
+        // Reset ultima rep
         lastRepMPV = 0.0
         lastRepPPV = 0.0
         

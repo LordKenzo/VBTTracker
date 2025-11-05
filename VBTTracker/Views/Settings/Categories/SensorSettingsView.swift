@@ -3,6 +3,7 @@
 //  VBTTracker
 //
 //  Impostazioni Sensore e Calibrazione
+//  ✅ UNIFICATO: Include funzionalità da SensorConnectionView
 //
 
 import SwiftUI
@@ -15,6 +16,9 @@ struct SensorSettingsView: View {
     @Environment(\.dismiss) var dismiss
     @State private var showCalibrationView = false
     @State private var showSensorScan = false
+    
+    // ✅ NUOVO: Toggle per dati real-time
+    @State private var showRealTimeData = false
     
     var body: some View {
         List {
@@ -39,6 +43,7 @@ struct SensorSettingsView: View {
             // MARK: - Calibration Section
             if bleManager.isConnected {
                 Section {
+                    // Pulsante Calibrazione
                     Button(action: { showCalibrationView = true }) {
                         HStack {
                             Label("Calibrazione Sensore", systemImage: "sensor.tag.radiowaves.forward.fill")
@@ -55,6 +60,7 @@ struct SensorSettingsView: View {
                         }
                     }
                     
+                    // Dettagli calibrazione
                     if let calibration = settings.savedCalibration {
                         VStack(alignment: .leading, spacing: 8) {
                             InfoSettingRow(
@@ -75,11 +81,31 @@ struct SensorSettingsView: View {
                                 icon: "arrow.forward.to.line"
                             )
                             
-                            Text("Data: \(calibration.timestamp, style: .date) alle \(calibration.timestamp, style: .time)")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
+                            HStack {
+                                Image(systemName: "clock")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                
+                                Text("Data: \(calibration.timestamp, style: .date) alle \(calibration.timestamp, style: .time)")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.top, 4)
                         }
                         .padding(.vertical, 4)
+                        
+                        // ✅ NUOVO: Pulsante Rimuovi Calibrazione
+                        Button(action: {
+                            bleManager.removeCalibration()
+                            calibrationManager.resetCalibration()
+                        }) {
+                            HStack {
+                                Image(systemName: "trash.fill")
+                                    .foregroundStyle(.red)
+                                Text("Rimuovi Calibrazione")
+                                    .foregroundStyle(.red)
+                            }
+                        }
                     }
                 } header: {
                     Text("Calibrazione")
@@ -105,10 +131,25 @@ struct SensorSettingsView: View {
                         Image(systemName: "waveform.path")
                             .foregroundStyle(.blue)
                             .frame(width: 24)
-                        Text("Frequenza")
+                        Text("Frequenza stimata")
                         Spacer()
-                        Text("200 Hz")
+                        Text(formatSR(bleManager.sampleRateHz))
                             .foregroundStyle(.secondary)
+                    }
+                    
+                    // Pulsante Config 200Hz
+                    Button {
+                        bleManager.configureFor200Hz()
+                    } label: {
+                        HStack {
+                            Image(systemName: "speedometer")
+                                .foregroundStyle(.blue)
+                            Text("Imposta 200 Hz")
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
                     }
                     
                     HStack {
@@ -122,6 +163,22 @@ struct SensorSettingsView: View {
                     }
                 } header: {
                     Text("Informazioni Sensore")
+                }
+            }
+            
+            // MARK: - ✅ NUOVO: Real-Time Data Section (Debug)
+            if bleManager.isConnected {
+                Section {
+                    Toggle("Mostra Dati Real-time", isOn: $showRealTimeData)
+                        .tint(.blue)
+                    
+                    if showRealTimeData {
+                        dataDisplaySection
+                    }
+                } header: {
+                    Text("Debug")
+                } footer: {
+                    Text("Visualizza i dati grezzi dal sensore in tempo reale. Utile per diagnostica e verifica della connessione.")
                 }
             }
         }
@@ -146,46 +203,159 @@ struct SensorSettingsView: View {
         }
     }
     
+    // MARK: - Helper: Format Sample Rate
+    
+    private func formatSR(_ hz: Double?) -> String {
+        guard let hz = hz, hz > 0 else { return "—" }
+        if hz >= 100 { return "\(Int(round(hz))) Hz" }
+        return String(format: "%.1f Hz", hz)
+    }
+    
     // MARK: - Sensor Status Row
     
     private var sensorStatusRow: some View {
-        HStack(spacing: 12) {
-            // Status indicator
-            ZStack {
-                Circle()
-                    .fill(bleManager.isConnected ? Color.green.opacity(0.2) : Color.gray.opacity(0.2))
-                    .frame(width: 40, height: 40)
-                
-                Circle()
-                    .fill(bleManager.isConnected ? Color.green : Color.gray)
-                    .frame(width: 12, height: 12)
-            }
-            
-            VStack(alignment: .leading, spacing: 4) {
-                Text(bleManager.sensorName)
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                
-                Text(bleManager.statusMessage)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            
-            Spacer()
-            
-            if bleManager.isConnected {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
+        VStack(alignment: .leading, spacing: 12) {
+            // Prima riga: Indicatore di stato + Nome del sensore
+            HStack(spacing: 12) {
+                // Indicatore di stato
+                ZStack {
+                    Circle()
+                        .fill(bleManager.isConnected ? Color.green.opacity(0.2) : Color.gray.opacity(0.2))
+                        .frame(width: 40, height: 40)
+
+                    Circle()
+                        .fill(bleManager.isConnected ? Color.green : Color.gray)
+                        .frame(width: 12, height: 12)
+                }
+
+                // Nome del sensore
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(bleManager.sensorName)
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+
+                    Text(bleManager.statusMessage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                // Icona di connessione
+                if bleManager.isConnected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(.green)
+                }
             }
         }
         .padding(.vertical, 4)
     }
+    
+    // MARK: - ✅ NUOVO: Real-Time Data Display Section
+    
+    private var dataDisplaySection: some View {
+        VStack(spacing: 16) {
+            // Accelerazione
+            dataRow(
+                title: "Accelerazione (g)",
+                values: bleManager.acceleration,
+                colors: [.red, .green, .blue]
+            )
+            
+            Divider()
+            
+            // Velocità Angolare
+            dataRow(
+                title: "Velocità Angolare (°/s)",
+                values: bleManager.angularVelocity,
+                colors: [.red, .green, .blue]
+            )
+            
+            Divider()
+            
+            // Angoli
+            dataRow(
+                title: "Angoli (°)",
+                values: bleManager.angles,
+                colors: [.red, .green, .blue]
+            )
+        }
+        .padding(.vertical, 8)
+    }
+    
+    // MARK: - ✅ NUOVO: Data Row Component
+    
+    private func dataRow(title: String, values: [Double], colors: [Color]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 20) {
+                // Assi fissi: X, Y, Z
+                let axes = ["X", "Y", "Z"]
+                ForEach(0..<3, id: \.self) { index in
+                    VStack(spacing: 4) {
+                        // Nome dell'asse (sempre presente)
+                        Text(axes[index])
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+
+                        // Valore con fallback a 0.0 se l'indice non esiste
+                        let value = index < values.count ? values[index] : 0.0
+                        Text(String(format: "%.2f", value))
+                            .font(.system(.body, design: .monospaced))
+                            .fontWeight(.semibold)
+                            .foregroundStyle(index < colors.count ? colors[index] : .primary)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+        }
+    }
+
 }
 
-#Preview {
+// MARK: - Preview
+
+#Preview("Connected & Calibrated") {
+    NavigationStack {
+        SensorSettingsView(
+            bleManager: {
+                let manager = BLEManager()
+                manager.isConnected = true
+                manager.isCalibrated = true
+                manager.sensorName = "WT901BLE67"
+                manager.sampleRateHz = 200.0
+                manager.acceleration = [0.02, -0.05, 1.00]
+                manager.angularVelocity = [1.2, -0.8, 0.3]
+                manager.angles = [2.5, -1.2, 0.0]
+                return manager
+            }(),
+            calibrationManager: CalibrationManager()
+        )
+    }
+}
+
+#Preview("Disconnected") {
     NavigationStack {
         SensorSettingsView(
             bleManager: BLEManager(),
+            calibrationManager: CalibrationManager()
+        )
+    }
+}
+
+#Preview("Connected - Not Calibrated") {
+    NavigationStack {
+        SensorSettingsView(
+            bleManager: {
+                let manager = BLEManager()
+                manager.isConnected = true
+                manager.isCalibrated = false
+                manager.sensorName = "WT901BLE67"
+                return manager
+            }(),
             calibrationManager: CalibrationManager()
         )
     }

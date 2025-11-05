@@ -2,566 +2,510 @@
 //  VBTRepDetector.swift
 //  VBTTracker
 //
-//  ✅ SCIENTIFIC VBT: Calcolo corretto MPV e PPV
-//  📊 Mean Propulsive Velocity e Peak Propulsive Velocity secondo letteratura (Sánchez-Medina et al. 2010)
+//  Full-cycle rep for bench press: PEAK → VALLEY → PEAK
+//  Aggiunge controllo spostamento (m) sulla fase concentrica
+//  Integra MPV/PPV + pattern library
+//  Swift 6-compatible
 //
 
 import Foundation
 
-class VBTRepDetector {
+final class VBTRepDetector {
+
+    // MARK: - Debug / Thresholds
+
+    // Metti a false per soglie realistiche
+    private let DEBUG_DETECTION = false
+
+    // Spostamento (m) minimo/massimo accettato per la fase concentrica
+    // Panca piana tipicamente ~0.30–0.50 m, lasciamo un po’ di margine.
+    private let MIN_CONC_DISPLACEMENT: Double = 0.20   // <— era 0.30
+       private let MAX_CONC_DISPLACEMENT: Double = 0.80
+
+    // Valori di sicurezza
+    private let DEFAULT_MIN_CONCENTRIC: TimeInterval = 0.45
+    private let DEFAULT_REFRACTORY: TimeInterval = 0.80
+    private let MAX_MPV = 2.5
+    private let MAX_PPV = 3.0
+    private let warmupReps = 3
     
-    // MARK: - Configuration
-    
+    private var useDisplacementGate: Bool { sampleRateHz >= 60 }
+    private let MIN_CONC_SAMPLES = 8
+
+    // MARK: - Public config
+
+    var sampleRateHz: Double = 50.0
+    var lookAheadSamples: Int = 10
+
     enum VelocityMeasurementMode {
-        case concentricOnly  // ✅ Standard VBT
+        case concentricOnly
         case fullROM
     }
-    
-    struct MultiAxisSample {
-        let timestamp: Date
-        let accX: Double
-        let accY: Double
-        let accZ: Double
-        let gyroMagnitude: Double
-    }
-    
     var velocityMode: VelocityMeasurementMode = .concentricOnly
-    
-    /// Pattern appreso da calibrazione (se disponibile)
+
     var learnedPattern: LearnedPattern?
-    
-    // MARK: - Parametri ADATTIVI
-    
+
+    // Callback
+    enum Phase { case idle, descending, ascending, completed }
+    var onPhaseChange: ((Phase) -> Void)?
+    var onUnrack: (() -> Void)?
+
+    // MARK: - Adaptive params
+
     private var windowSize: Int {
-        max(3, SettingsManager.shared.repSmoothingWindow)
+        max(5, SettingsManager.shared.repSmoothingWindow) // un filo più robusto
     }
     
-    /// Ampiezza minima DINAMICA basata su pattern appreso
+    private func minConcentricDurationSec() -> TimeInterval {
+        if DEBUG_DETECTION { return 0.30 }
+        let fromPattern = learnedPattern.map { max(0.50, $0.avgConcentricDuration * 0.8) } ?? max(0.50, DEFAULT_MIN_CONCENTRIC)
+        return lowSRSafeMode ? max(0.35, fromPattern * 0.85) : fromPattern  // NEW
+    }
+
     private var minAmplitude: Double {
-        if let pattern = learnedPattern {
-            return pattern.dynamicMinAmplitude
+        let base: Double
+        if let p = learnedPattern {
+            base = max(0.18, p.dynamicMinAmplitude * 0.9)
         } else if isInWarmup {
-            return SettingsManager.shared.repMinAmplitude * 0.4
+            base = max(0.18, SettingsManager.shared.repMinAmplitude * 0.6)
         } else if let learned = learnedMinAmplitude {
-            return learned * 0.5
+            base = max(0.18, learned * 0.7)
         } else {
-            return SettingsManager.shared.repMinAmplitude * 0.5
+            base = 0.25
         }
+        return lowSRSafeMode ? max(0.15, base * 0.8) : base  // NEW
     }
-    
-    /// Anti-doppio-conteggio
-    private var minTimeBetween: TimeInterval {
-        if let pattern = learnedPattern {
-            return pattern.avgConcentricDuration * 1.3
-        }
-        return 0.5
-    }
-    
-    /// Soglia per decidere se è "fermo" o "si muove"
+
     private var idleThreshold: Double {
-        learnedPattern?.restThreshold ?? 0.08
+        if let p = learnedPattern { return max(0.06, p.restThreshold) }
+        return 0.08
     }
-    
-    /// Numero rep per warmup (se non c'è pattern appreso)
-    private let warmupReps: Int = 3
-    
-    // MARK: - State Tracking
-    
+
+    private var minRefractory: TimeInterval {
+        let base = DEBUG_DETECTION ? 0.40 : DEFAULT_REFRACTORY
+        return lowSRSafeMode ? max(0.50, base * 0.75) : base   // NEW (≈0.6s)
+    }
+
+    // MARK: - Internal state
+
+    struct AccelMA { let timestamp: Date; let accZ: Double }
+
     private var samples: [AccelerationSample] = []
     private var smoothedValues: [Double] = []
-    
-    // Tracking estremi locali
+
     private var lastPeak: (value: Double, index: Int, time: Date)?
     private var lastValley: (value: Double, index: Int, time: Date)?
     private var lastRepTime: Date?
-    
-    private var isFirstMovement: Bool = true
-    
-    // Adaptive learning
+
+    private var isFirstMovement = true
+    private var isInWarmup = true
     private var repAmplitudes: [Double] = []
     private var learnedMinAmplitude: Double?
-    private var isInWarmup: Bool = true
-    private var lastMovementTime: Date?
-    
-    // Voice feedback
-    var hasAnnouncedUnrack = false
-    private var lastAnnouncedDirection: Direction = .none
-    var onPhaseChange: ((Phase) -> Void)?
-    
-    // ✅ NUOVO: Tracking fase concentrica per calcolo MPV/PPV
+
+    private enum Direction { case none, up, down }
+    private var currentDirection: Direction = .none
+
+    // Stato per ciclo completo (bench: peak→valley→peak)
+    // 1) Attendo discesa (peak→valley)
+    // 2) Attendo salita (valley→peak) -> conteggio rep
+    private enum CycleState { case waitingDescent, waitingAscent }
+    private var cycleState: CycleState = .waitingDescent
+
+    // Traccia della fase concentrica corrente (valley→peak)
+    private struct ConcentricSample {
+        let timestamp: Date
+        let accZ: Double
+        let smoothedAccZ: Double
+    }
     private var concentricSamples: [ConcentricSample] = []
     private var isTrackingConcentric = false
+
+    // Unrack (stacco iniziale)
+    private var hasAnnouncedUnrack = false
+    private var unrackCooldownUntil: Date?
     
-    /// Campione durante fase concentrica
-    struct ConcentricSample {
-        let timestamp: Date
-        let accZ: Double          // Accelerazione raw (g)
-        let smoothedAccZ: Double  // Accelerazione smoothed (g)
-    }
-    
-    enum Phase {
-        case idle
-        case descending
-        case ascending
-        case completed
-    }
-    
-    private enum Direction {
-        case none
-        case up      // Sta salendo
-        case down    // Sta scendendo
-    }
-    
-    private var currentDirection: Direction = .none
-    
-    // MARK: - Public Methods
-    
+    private var lowSRSafeMode: Bool { sampleRateHz < 40 }
+
+    // MARK: - Public API
+
     func addSample(accZ: Double, timestamp: Date) -> RepDetectionResult {
-        let sample = AccelerationSample(timestamp: timestamp, accZ: accZ)
-        samples.append(sample)
-        
-        if samples.count > 200 {
-            samples.removeFirst()
-        }
-        
+        samples.append(AccelerationSample(timestamp: timestamp, accZ: accZ))
+        if samples.count > 512 { samples.removeFirst() }
+
         let smoothed = calculateMovingAverage()
         smoothedValues.append(smoothed)
-        
-        if smoothedValues.count > 200 {
-            smoothedValues.removeFirst()
-        }
-        
-        // ✅ NUOVO: Traccia campioni concentrci se in fase di risalita
+        if smoothedValues.count > 512 { smoothedValues.removeFirst() }
+
         if isTrackingConcentric {
-            let concentricSample = ConcentricSample(
-                timestamp: timestamp,
-                accZ: accZ,
-                smoothedAccZ: smoothed
-            )
-            concentricSamples.append(concentricSample)
+            concentricSamples.append(.init(timestamp: timestamp, accZ: accZ, smoothedAccZ: smoothed))
         }
-        
-        return detectRepSimple()
+
+        return detectRep()
     }
-    
-    /// Aggiunge un campione multi-assiale; restituisce risultato di detection.
-    func addMultiAxisSample(
-        accX: Double,
-        accY: Double,
-        accZ: Double,
-        gyro: [Double],
-        timestamp: Date
-    ) -> RepDetectionResult {
-        
-        // 1. Calcola magnitude orizzontale (X/Y)
-        let horizontalMag = sqrt(accX * accX + accY * accY)
-        
-        // 2. Calcola magnitude giroscopio
-        let gyroMag = sqrt(gyro[0]*gyro[0] + gyro[1]*gyro[1] + gyro[2]*gyro[2])
-        
-        // 3. Motion intensity = acc horizontal + gyro weighted
-        let motionIntensity = horizontalMag + (gyroMag * 0.005)
-        
-        // 4. Usa motion intensity per DETECTION
-        let sample = AccelerationSample(
-            timestamp: timestamp,
-            accZ: motionIntensity
-        )
-        
-        samples.append(sample)
-        
-        // 5. Smoothing e detection
-        let smoothed = calculateMovingAverage()
-        smoothedValues.append(smoothed)
-        
-        // ✅ NUOVO: Traccia ACCZ VERTICALE raw per calcolo velocità
-        if isTrackingConcentric {
-            let concentricSample = ConcentricSample(
-                timestamp: timestamp,
-                accZ: accZ,  // ✅ AccZ originale verticale, NON motion intensity
-                smoothedAccZ: smoothed
-            )
-            concentricSamples.append(concentricSample)
-        }
-        
-        // 6. Detect
-        return detectRepSimple()
-    }
-    
+
     func reset() {
         samples.removeAll()
         smoothedValues.removeAll()
         lastPeak = nil
         lastValley = nil
         lastRepTime = nil
-        currentDirection = .none
-        hasAnnouncedUnrack = false
-        lastAnnouncedDirection = .none
-        
-        // Reset adaptive learning
+        isFirstMovement = true
+        isInWarmup = true
         repAmplitudes.removeAll()
         learnedMinAmplitude = nil
-        isInWarmup = true
-        lastMovementTime = nil
-        
-        isFirstMovement = true
-        
-        // ✅ NUOVO: Reset tracking concentrico
+        currentDirection = .none
+        cycleState = .waitingDescent
         concentricSamples.removeAll()
         isTrackingConcentric = false
+        hasAnnouncedUnrack = false
+        unrackCooldownUntil = nil
     }
-    
-    func getSamples() -> [AccelerationSample] {
-        return samples
+
+    func apply(pattern: LearnedPattern) {
+        learnedPattern = pattern
+        isInWarmup = false
+        learnedMinAmplitude = pattern.dynamicMinAmplitude
     }
-    
-    // MARK: - ALGORITMO SEMPLIFICATO
-    
-    /// Logica: Conta OGNI pattern "picco → valle → picco"
-    private func detectRepSimple() -> RepDetectionResult {
+
+    func getSamples() -> [AccelerationSample] { samples }
+
+    // MARK: - Core detection (peak→valley→peak)
+
+    private func detectRep() -> RepDetectionResult {
         guard smoothedValues.count >= 5 else {
-            return RepDetectionResult(
-                repDetected: false,
-                currentValue: 0,
-                meanPropulsiveVelocity: nil,
-                peakPropulsiveVelocity: nil,
-                duration: nil
-            )
+            return RepDetectionResult(repDetected: false,
+                                      currentValue: smoothedValues.last ?? 0,
+                                      meanPropulsiveVelocity: nil,
+                                      peakPropulsiveVelocity: nil,
+                                      duration: nil)
         }
-        
+
         let current = smoothedValues.last!
-        let currentIndex = smoothedValues.count - 1
-        let timestamp = Date()
-        
-        // 1️⃣ Determina DIREZIONE attuale
+        maybeAnnounceUnrack(current: current)
+
+        let idx = smoothedValues.count - 1
+        let now = Date()
+
         let newDirection = detectDirection()
-        
         var repDetected = false
-        var mpv: Double?  // Mean Propulsive Velocity
-        var ppv: Double?  // Peak Propulsive Velocity
-        var detectedDuration: Double? = nil
-        
-        // 2️⃣ Rileva INVERSIONI di direzione
-        
+        var mpv: Double? = nil
+        var ppv: Double? = nil
+        var duration: Double? = nil
+
+        // Cambi di direzione
         if newDirection != currentDirection && newDirection != .none {
-            
-            // INVERSIONE VERSO IL BASSO (abbiamo appena passato un PICCO)
-            if newDirection == .down && currentDirection == .up {
-                let peakValue = findRecentMax(lookback: 3)
-                lastPeak = (peakValue, currentIndex, timestamp)
-                
-                print("🔴 PICCO a \(String(format: "%.2f", peakValue))g")
-                
-                // ✅ NUOVO: STOP tracking concentrico (fine risalita)
-                isTrackingConcentric = false
-                
-                // Voice: discesa (solo se non l'abbiamo già detto)
-                if lastAnnouncedDirection != .down {
-                    if !hasAnnouncedUnrack && lastValley == nil {
-                        hasAnnouncedUnrack = true
-                        onPhaseChange?(.descending)
-                    }
-                    lastAnnouncedDirection = .down
-                }
-            }
-            
-            // INVERSIONE VERSO L'ALTO (abbiamo appena passato una VALLE)
-            else if newDirection == .up && currentDirection == .down {
-                let valleyValue = findRecentMin(lookback: 3)
-                lastValley = (valleyValue, currentIndex, timestamp)
-                
-                print("🔵 VALLE a \(String(format: "%.2f", valleyValue))g")
-                
-                // ✅ NUOVO: START tracking concentrico (inizio risalita)
-                concentricSamples.removeAll()
-                isTrackingConcentric = true
-                
-                // Voice: salita
-                if lastAnnouncedDirection != .up {
+
+            switch cycleState {
+
+            case .waitingDescent:
+                // caso "normale": abbiamo visto una discesa che si chiude in valley
+                if newDirection == .up && currentDirection == .down {
+                    let valleyVal = findRecentMin(lookback: 3)
+                    lastValley = (valleyVal, idx, now)
+
+                    // avvia la concentrica (valley→peak)
+                    concentricSamples.removeAll()
+                    isTrackingConcentric = true
                     onPhaseChange?(.ascending)
-                    lastAnnouncedDirection = .up
-                }
-                
-                // ✅ CONTA REP: Se abbiamo pattern PICCO → VALLE → ora risale
-                if let peak = lastPeak, let valley = lastValley {
-                    
-                    // ✅ FIX: Ignora il primo movimento (stacco)
-                    if isFirstMovement {
-                        print("⚠️ Primo movimento ignorato (stacco dal rack)")
-                        isFirstMovement = false
-                        lastPeak = nil
-                        return RepDetectionResult(
-                            repDetected: false,
-                            currentValue: current,
-                            meanPropulsiveVelocity: nil,
-                            peakPropulsiveVelocity: nil,
-                            duration: nil
-                        )
+                    cycleState = .waitingAscent
+
+                    if DEBUG_DETECTION {
+                        print("⬇️→⬆️  VALLEY \(String(format: "%.3f", valleyVal)) @\(idx)")
                     }
-                    
-                    // Validazione MINIMA
-                    let amplitude = peak.value - valley.value
-                    let timeSinceLast = lastRepTime?.timeIntervalSinceNow ?? -1.0
-                    let validTiming = abs(timeSinceLast) > minTimeBetween || lastRepTime == nil
-                                        
-                    // FILTRO INTELLIGENTE: Ignora micro-movimenti dopo inattività
-                    let timeSinceMovement = lastMovementTime?.timeIntervalSinceNow ?? 0
-                    let isAfterLongPause = abs(timeSinceMovement) > 2.0
-                    
-                    // Se sono fermo da > 2s, richiedi ampiezza maggiore
-                    let amplitudeThreshold = isAfterLongPause ? minAmplitude * 1.5 : minAmplitude
-                    
-                    // CONTA se: ampiezza OK + timing OK
-                    if amplitude >= amplitudeThreshold && validTiming {
-                        
-                        // ✅ NUOVO: Calcola MPV e PPV dalla fase concentrica precedente
-                        // NOTA: Usa i campioni concentrci dell'ultima risalita COMPLETATA (prima della valle corrente)
-                        // Quindi dobbiamo aspettare il prossimo picco per processarli
-                        
-                        // Per ora usiamo stima legacy come fallback
-                        let duration = valley.time.timeIntervalSince(peak.time)
-                        detectedDuration = abs(duration)
-                        
-                        // Fallback: stima semplice
-                        let legacyVelocity = estimateVelocityLegacy(amplitude: amplitude, duration: abs(duration))
-                        mpv = legacyVelocity
-                        ppv = legacyVelocity * 1.2  // Stima PPV come 120% di MPV
-                        
-                        repDetected = true
-                        lastRepTime = timestamp
-                        lastMovementTime = timestamp
-                        
-                        // 🎓 LEARNING: Impara dalle prime rep
+                } else {
+                    // Fallback: se non hai superato la soglia di direzione, usa un minimo locale
+                    let t = localTurningPoint()
+                    if let v = t.valley {
+                        lastValley = (v, idx, now)
+                        concentricSamples.removeAll()
+                        isTrackingConcentric = true
+                        onPhaseChange?(.ascending)
+                        cycleState = .waitingAscent
+
+                        if DEBUG_DETECTION {
+                            print("⬇️→⬆️  VALLEY(local) \(String(format: "%.3f", v)) @\(idx)")
+                        }
+                    }
+                }
+
+            case .waitingAscent:
+                // caso "normale": salita che si chiude in peak
+                var justPeaked = false
+                if newDirection == .down && currentDirection == .up {
+                    let peakVal = findRecentMax(lookback: 3)
+                    lastPeak = (peakVal, idx, now)
+                    isTrackingConcentric = false
+                    justPeaked = true
+                } else {
+                    // Fallback: peak locale se la soglia di direzione non scatta
+                    let t = localTurningPoint()
+                    if let p = t.peak {
+                        lastPeak = (p, idx, now)
+                        isTrackingConcentric = false
+                        justPeaked = true
+                        if DEBUG_DETECTION {
+                            print("⬆️→⬇️  PEAK(local) \(String(format: "%.3f", p)) @\(idx)")
+                        }
+                    }
+                }
+
+                // Se abbiamo effettivamente un peak (normale o fallback), valida e conta la rep
+                if justPeaked, let valley = lastValley, let peakT = lastPeak {
+                    let amplitude = peakT.value - valley.value
+                    let concDur  = peakT.time.timeIntervalSince(valley.time)
+
+                    let refractoryOK = lastRepTime == nil || now.timeIntervalSince(lastRepTime!) >= minRefractory
+                    let ampOK = amplitude >= minAmplitude
+                    let durOK = concDur >= minConcentricDurationSec()
+
+                    // ---- GATE di spostamento (attivo solo se SR≥60 Hz) ----
+                    var dispOK = true
+                    if useDisplacementGate, concentricSamples.count >= MIN_CONC_SAMPLES {
+                        let (mpv0, ppv0, disp) = calculatePropulsiveVelocitiesAndDisplacement(from: concentricSamples)
+                        let clamped = clampVBT(mpv0, ppv0)
+                        mpv = clamped.0
+                        ppv = clamped.1
+                        if let d = disp {
+                            dispOK = (MIN_CONC_DISPLACEMENT...MAX_CONC_DISPLACEMENT).contains(d)
+                            if DEBUG_DETECTION {
+                                print("📏 disp=\(String(format: "%.2f", d)) m  gate=\(dispOK ? "OK" : "KO")")
+                            }
+                        } else {
+                            dispOK = false
+                        }
+                    } else {
+                        // SR bassa: calcola MPV/PPV ma non bloccare per displacement
+                        if concentricSamples.count > 5 {
+                            let (mpv0, ppv0, _) = calculatePropulsiveVelocitiesAndDisplacement(from: concentricSamples)
+                            let clamped = clampVBT(mpv0, ppv0)
+                            mpv = clamped.0
+                            ppv = clamped.1
+                        }
+                    }
+                    // -------------------------------------------------------
+
+                    if DEBUG_DETECTION {
+                        let peakValForPrint = peakT.value
+                        print("⬆️→⬇️  PEAK \(String(format: "%.3f", peakValForPrint)) @\(idx) | amp=\(String(format: "%.3f", amplitude))g  dur=\(String(format: "%.2f", concDur))s  [ampOK=\(ampOK) durOK=\(durOK) refOK=\(refractoryOK)\(useDisplacementGate ? " dispOK=\(dispOK)" : "")]  thr=\(String(format: "%.2f", minAmplitude))g")
+                    }
+
+                    if isFirstMovement {
+                        isFirstMovement = false
+                    } else if ampOK && refractoryOK && durOK && (!useDisplacementGate || dispOK) {
+                        repDetected  = true
+                        duration     = concDur
+                        lastRepTime  = now
+
+                        // warmup learning
                         repAmplitudes.append(amplitude)
                         if repAmplitudes.count == warmupReps {
                             learnedMinAmplitude = repAmplitudes.reduce(0, +) / Double(warmupReps)
                             isInWarmup = false
-                            print("🎓 Warmup completato - Soglia appresa: \(String(format: "%.2f", learnedMinAmplitude!))g")
                         }
-                        
-                        // Marca picco sul grafico
-                        if peak.index < samples.count {
-                            samples[peak.index].isPeak = true
+
+                        if DEBUG_DETECTION {
+                            print("✅ REP DETECTED | MPV=\(mpv.map { String(format: "%.3f", $0) } ?? "nil")  PPV=\(ppv.map { String(format: "%.3f", $0) } ?? "nil")  concDur=\(String(format: "%.2f", concDur))s  amp=\(String(format: "%.3f", amplitude))g")
                         }
-                        
-                        let phase = isInWarmup ? "WARMUP" : "ACTIVE"
-                        print("✅ REP [\(phase)] - Amp: \(String(format: "%.2f", amplitude))g, " +
-                              "MPV: \(String(format: "%.2f", mpv ?? 0.0)) m/s, " +
-                              "PPV: \(String(format: "%.2f", ppv ?? 0.0)) m/s")
-                        
-                    } else {
-                        let reason = !validTiming ? "anti-rimbalzo (\(String(format: "%.2f", abs(timeSinceLast)))s)" :
-                                    isAfterLongPause ? "micro-movimento dopo pausa (amp \(String(format: "%.2f", amplitude))g < \(String(format: "%.2f", amplitudeThreshold))g)" :
-                                    "ampiezza troppo bassa (\(String(format: "%.2f", amplitude))g)"
-                        print("⚠️ Pattern ignorato: \(reason)")
+                    } else if DEBUG_DETECTION {
+                        let dispReason = useDisplacementGate ? (dispOK ? "" : "disp ") : ""
+                        print("❎ REJECTED | reason: \(ampOK ? "" : "amp ") \(durOK ? "" : "dur ") \(refractoryOK ? "" : "refractory ") \(dispReason)")
                     }
-                    
-                    // Reset peak per prossimo ciclo
-                    lastPeak = nil
+
+                    onPhaseChange?(.descending)
+                    cycleState = .waitingDescent
                 }
             }
-            
+
             currentDirection = newDirection
         }
-        
-        // ✅ NUOVO: Se abbiamo appena rilevato una rep E abbiamo campioni concentrci, calcoliamo MPV/PPV
-        if repDetected && concentricSamples.count > 5 {
-            let velocities = calculatePropulsiveVelocities(from: concentricSamples)
-            mpv = velocities.mpv
-            ppv = velocities.ppv
-            
-            print("📊 Velocità Propulsive Calcolate - MPV: \(String(format: "%.3f", mpv ?? 0)) m/s, PPV: \(String(format: "%.3f", ppv ?? 0)) m/s")
-        }
-        
-        return RepDetectionResult(
-            repDetected: repDetected,
-            currentValue: current,
-            meanPropulsiveVelocity: mpv,
-            peakPropulsiveVelocity: ppv,
-            duration: detectedDuration
-        )
+
+        return RepDetectionResult(repDetected: repDetected,
+                                  currentValue: current,
+                                  meanPropulsiveVelocity: mpv,
+                                  peakPropulsiveVelocity: ppv,
+                                  duration: duration)
     }
-    
-    // MARK: - ✅ NUOVO: Calcolo Scientifico MPV/PPV
-    
-    /// Calcola Mean Propulsive Velocity (MPV) e Peak Propulsive Velocity (PPV)
-    /// secondo la letteratura scientifica (Sánchez-Medina et al. 2010)
-    ///
-    /// - Parameter samples: Campioni accelerazione durante fase concentrica
-    /// - Returns: Tupla con (mpv, ppv) in m/s
-    private func calculatePropulsiveVelocities(from samples: [ConcentricSample]) -> (mpv: Double?, ppv: Double?) {
-        guard samples.count >= 3 else { return (nil, nil) }
-        
-        // 1️⃣ Converti accelerazioni da g a m/s²
-        var accelerationsMS2: [Double] = []
-        var timestamps: [TimeInterval] = []
-        
-        let startTime = samples.first!.timestamp
-        
-        for sample in samples {
-            // Rimuovi componente gravitazionale (~1g verso il basso)
-            // Assumiamo che sensore sia calibrato con gravità inclusa
-            var accMS2 = sample.smoothedAccZ * 9.81
-            
-            // Se accZ > 0.8g, sottrai 1g (bias gravitazionale)
-            if sample.smoothedAccZ > 0.8 {
-                accMS2 = (sample.smoothedAccZ - 1.0) * 9.81
-            } else if sample.smoothedAccZ < -0.8 {
-                accMS2 = (sample.smoothedAccZ + 1.0) * 9.81
-            }
-            
-            accelerationsMS2.append(accMS2)
-            timestamps.append(sample.timestamp.timeIntervalSince(startTime))
-        }
-        
-        // 2️⃣ Integra accelerazione per ottenere velocità istantanea
-        // Metodo: Integrazione trapezoidale (più accurata di Eulero semplice)
-        var velocities: [Double] = [0.0]  // Velocità iniziale = 0
-        
-        for i in 1..<accelerationsMS2.count {
-            let dt = timestamps[i] - timestamps[i-1]
-            
-            // Integrazione trapezoidale: v[i] = v[i-1] + (a[i-1] + a[i])/2 * dt
-            let avgAccel = (accelerationsMS2[i-1] + accelerationsMS2[i]) / 2.0
-            let newVelocity = velocities.last! + avgAccel * dt
-            
-            velocities.append(newVelocity)
-        }
-        
-        // 3️⃣ Identifica FINE fase propulsiva
-        // Secondo letteratura: quando accelerazione < -9.81 m/s² (gravità)
-        var propulsiveEndIndex = accelerationsMS2.count - 1  // Default: tutta la fase
-        
-        for (index, accel) in accelerationsMS2.enumerated() {
-            if accel < -9.81 {
-                propulsiveEndIndex = index
-                print("📉 Fine fase propulsiva a \(String(format: "%.2f", timestamps[index]))s (a = \(String(format: "%.2f", accel)) m/s²)")
-                break
-            }
-        }
-        
-        // Se non troviamo decelerazione significativa, assumiamo che sia carico pesante (>76% 1RM)
-        // In questo caso, fase propulsiva = intera fase concentrica
-        if propulsiveEndIndex == accelerationsMS2.count - 1 {
-            print("📌 Carico pesante: fase propulsiva = intera concentrica")
-        }
-        
-        // 4️⃣ Calcola MPV (Mean Propulsive Velocity)
-        let propulsiveVelocities = Array(velocities[0...propulsiveEndIndex])
-        
-        guard !propulsiveVelocities.isEmpty else { return (nil, nil) }
-        
-        let mpv = propulsiveVelocities.reduce(0.0, +) / Double(propulsiveVelocities.count)
-        
-        // 5️⃣ Calcola PPV (Peak Propulsive Velocity)
-        let ppv = propulsiveVelocities.max() ?? 0.0
-        
-        // 6️⃣ Validazione: valori ragionevoli per VBT (0.1 - 2.5 m/s)
-        let validMPV = (0.1...2.5).contains(mpv) ? mpv : nil
-        let validPPV = (0.1...3.0).contains(ppv) ? ppv : nil
-        
-        return (validMPV, validPPV)
+
+    // MARK: - Unrack (stacco)
+
+    private func maybeAnnounceUnrack(current: Double) {
+        guard !hasAnnouncedUnrack,
+              lastRepTime == nil,
+              abs(current) > idleThreshold * 2 else { return }
+        if let until = unrackCooldownUntil, Date() < until { return }
+        onUnrack?()
+        hasAnnouncedUnrack = true
+        unrackCooldownUntil = Date().addingTimeInterval(5)
     }
-    
-    // MARK: - Helper: Direction Detection
-    
-    /// Rileva se il segnale sta salendo, scendendo o è piatto
+
+    // MARK: - MPV/PPV + Displacement
+
+    /// Ritorna (MPV, PPV, Displacement[m] sulla finestra concentrica)
+    private func calculatePropulsiveVelocitiesAndDisplacement(from src: [ConcentricSample]) -> (Double?, Double?, Double?) {
+        guard src.count >= 3 else { return (nil, nil, nil) }
+        let t0 = src.first!.timestamp
+
+        // 1) Serie acc (in g) e tempi relativi
+        let az = src.map { $0.smoothedAccZ }
+        let tt = src.map { $0.timestamp.timeIntervalSince(t0) }
+
+        // 2) Detrend acc (toglie media finestra)
+        let meanG = az.reduce(0, +) / Double(az.count)
+        let acc_ms2 = az.map { ($0 - meanG) * 9.81 }
+
+        // 3) Integrazione trapezoidale per velocità
+        var v = [0.0]
+        for i in 1..<acc_ms2.count {
+            let dt = max(0, tt[i] - tt[i-1])
+            v.append(v.last! + 0.5 * (acc_ms2[i-1] + acc_ms2[i]) * dt)
+        }
+
+        // 4) Trova picco velocità e taglia fino allo zero-crossing successivo
+        let peakIdx = v.firstIndex(of: (v.max() ?? 0.0)) ?? (v.count - 1)
+        var endIdx = peakIdx
+        for i in peakIdx..<acc_ms2.count where i > 0 {
+            if acc_ms2[i-1] > 0 && acc_ms2[i] <= 0 { endIdx = i; break }
+        }
+        let vConc = Array(v[0...endIdx])
+        let tConc = Array(tt[0...endIdx])
+        guard !vConc.isEmpty else { return (nil, nil, nil) }
+
+        // 5) MPV/PPV
+        let mpv = vConc.reduce(0, +) / Double(vConc.count)
+        let ppv = vConc.max() ?? 0
+
+        // 6) Spostamento durante la fase concentrica: integra v
+        var x = [0.0]
+        for i in 1..<vConc.count {
+            let dt = max(0, tConc[i] - tConc[i-1])
+            x.append(x.last! + 0.5 * (vConc[i-1] + vConc[i]) * dt)
+        }
+        let disp = x.last ?? 0.0 // m
+
+        return ((0.05...MAX_MPV).contains(mpv) ? mpv : nil,
+                (0.05...MAX_PPV).contains(ppv) ? ppv : nil,
+                abs(disp))
+    }
+
+    private func clampVBT(_ mpv: Double?, _ ppv: Double?) -> (Double?, Double?) {
+        (mpv.map { min($0, MAX_MPV) }, ppv.map { min($0, MAX_PPV) })
+    }
+
+    // MARK: - Direction helpers
+
     private func detectDirection() -> Direction {
         guard smoothedValues.count >= 4 else { return .none }
-        
         let last4 = Array(smoothedValues.suffix(4))
-        
-        // Aggiorna timestamp ultimo movimento significativo
-        if last4.last! > idleThreshold || last4.last! < -idleThreshold {
-            lastMovementTime = Date()
-        }
-        
-        // Calcola trend medio (quante volte sale vs scende)
-        var ups = 0
-        var downs = 0
-        
+        let thr = lowSRSafeMode ? 0.01 : 0.03     // NEW: più sensibile sotto 40 Hz
+        var ups = 0, downs = 0
         for i in 1..<last4.count {
-            let delta = last4[i] - last4[i-1]
-            if delta > 0.03 { ups += 1 }
-            else if delta < -0.03 { downs += 1 }
+            let d = last4[i] - last4[i-1]
+            if d >  thr { ups  += 1 }
+            if d < -thr { downs += 1 }
         }
-        
-        // Decidi direzione
-        if ups >= 2 && ups > downs { return .up }
-        if downs >= 2 && downs > ups { return .down }
-        
+        if ups   >= 2 && ups   > downs { return .up }
+        if downs >= 2 && downs > ups   { return .down }
         return currentDirection
     }
     
-    /// Trova massimo negli ultimi N campioni
+    private func localTurningPoint() -> (valley: Double?, peak: Double?) {
+        guard smoothedValues.count >= 3 else { return (nil, nil) }
+        let a = smoothedValues[smoothedValues.count - 3]
+        let b = smoothedValues[smoothedValues.count - 2]
+        let c = smoothedValues[smoothedValues.count - 1]
+        if b < a && b < c { return (b, nil) }   // valley locale
+        if b > a && b > c { return (nil, b) }   // peak locale
+        return (nil, nil)
+    }
+
+
     private func findRecentMax(lookback: Int) -> Double {
-        guard smoothedValues.count >= lookback else {
-            return smoothedValues.last ?? 0
-        }
-        return smoothedValues.suffix(lookback).max() ?? 0
+        smoothedValues.suffix(lookback).max() ?? (smoothedValues.last ?? 0)
     }
-    
-    /// Trova minimo negli ultimi N campioni
     private func findRecentMin(lookback: Int) -> Double {
-        guard smoothedValues.count >= lookback else {
-            return smoothedValues.last ?? 0
-        }
-        return smoothedValues.suffix(lookback).min() ?? 0
+        smoothedValues.suffix(lookback).min() ?? (smoothedValues.last ?? 0)
     }
-    
-    // MARK: - Legacy Velocity Estimation (Fallback)
-    
-    /// Stima legacy della velocità (usata come fallback)
-    private func estimateVelocityLegacy(amplitude: Double, duration: Double) -> Double {
-        // ROM stimato in base ad ampiezza
-        let estimatedROM: Double
-        if amplitude < 0.4 {
-            estimatedROM = 0.20
-        } else if amplitude < 0.7 {
-            estimatedROM = 0.45
-        } else if amplitude < 1.0 {
-            estimatedROM = 0.60
-        } else {
-            estimatedROM = 0.75
-        }
-        
-        // Velocità media: v = s / t
-        if duration > 0.05 {
-            return estimatedROM / duration
-        } else {
-            // Fallback: formula cinematica v = sqrt(2*a*s)
-            let accelMS2 = amplitude * 9.81
-            return sqrt(2.0 * accelMS2 * estimatedROM)
-        }
-    }
-    
-    // MARK: - Helper: Smoothing
-    
+
     private func calculateMovingAverage() -> Double {
-        guard samples.count >= windowSize else {
-            return samples.last?.accZ ?? 0
-        }
-        
-        let window = samples.suffix(windowSize)
-        let sum = window.reduce(0.0) { $0 + $1.accZ }
-        return sum / Double(windowSize)
+        guard samples.count >= windowSize else { return samples.last?.accZ ?? 0 }
+        return samples.suffix(windowSize).map(\.accZ).reduce(0, +) / Double(windowSize)
     }
 }
 
-// MARK: - Result Model
+// MARK: - Result
 
 struct RepDetectionResult {
     let repDetected: Bool
     let currentValue: Double
-    
-    // ✅ NUOVO: Velocità separate secondo standard VBT
-    let meanPropulsiveVelocity: Double?   // MPV (media fase propulsiva)
-    let peakPropulsiveVelocity: Double?   // PPV (picco fase propulsiva)
-    
+    let meanPropulsiveVelocity: Double?
+    let peakPropulsiveVelocity: Double?
     let duration: Double?
-    
-    // Computed: Velocità "legacy" per retrocompatibilità
-    var peakVelocity: Double? {
-        return peakPropulsiveVelocity ?? meanPropulsiveVelocity
+    var peakVelocity: Double? { peakPropulsiveVelocity ?? meanPropulsiveVelocity }
+}
+
+// MARK: - Pattern learning integrazione
+
+extension VBTRepDetector {
+
+    private static func makeFeatureVector(from samples: [AccelerationSample]) -> [Double] {
+        guard samples.count > 3 else { return [] }
+        let accZ = samples.map(\.accZ)
+        let mean = accZ.reduce(0, +) / Double(accZ.count)
+        let std = sqrt(accZ.map { pow($0 - mean, 2) }.reduce(0, +) / Double(accZ.count))
+        let range = (accZ.max() ?? 0) - (accZ.min() ?? 0)
+        let diffs = zip(accZ.dropFirst(), accZ).map { $0 - $1 }
+        let spectralEnergy = sqrt(diffs.map { $0 * $0 }.reduce(0, +) / Double(diffs.count))
+        return [mean, std, range / 2.0, spectralEnergy, Double(samples.count) / 100.0]
+    }
+
+    func recognizePatternIfPossible() {
+        guard samples.count > 30 else { return }
+        Task { @MainActor in
+            if let match = LearnedPatternLibrary.shared.matchPattern(for: samples) {
+                let features = Self.makeFeatureVector(from: samples)
+                guard !features.isEmpty else { return }
+                let dist = LearnedPatternLibrary.shared.distance(match.featureVector, features)
+                if dist < 0.35 {
+                    print("Pattern riconosciuto: \(match.label) \(match.repCount) reps")
+                    learnedPattern = LearnedPattern(from: match)
+                } else {
+                    print("Nessun pattern simile (dist \(String(format: "%.3f", dist)))")
+                }
+            }
+        }
+    }
+
+    func savePatternSequence(
+        label: String,
+        repCount: Int,
+        loadPercentage: Double? = nil,
+        avgMPV: Double? = nil,
+        avgPPV: Double? = nil
+    ) {
+        guard repCount > 0 else { return }
+
+        let amp = (samples.map { $0.accZ }.max() ?? 0) - (samples.map { $0.accZ }.min() ?? 0)
+        let duration = (samples.last?.timestamp.timeIntervalSince(samples.first?.timestamp ?? Date())) ?? 0
+        let features = Self.makeFeatureVector(from: samples)
+        guard !features.isEmpty else { return }
+
+        let new = PatternSequence(
+            id: UUID(),
+            date: Date(),
+            label: label,
+            repCount: repCount,
+            loadPercentage: loadPercentage,
+            avgDuration: duration / Double(repCount),
+            avgAmplitude: amp,
+            avgMPV: (avgMPV ?? 0.5),
+            avgPPV: (avgPPV ?? 0.6),
+            featureVector: features
+        )
+
+        Task { @MainActor in
+            LearnedPatternLibrary.shared.addPattern(new)
+            print("🧠 Pattern salvato: \(label) \(repCount) reps | MPV=\(String(format: "%.2f", new.avgMPV)) PPV=\(String(format: "%.2f", new.avgPPV))")
+
+        }
     }
 }

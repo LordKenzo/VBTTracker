@@ -2,52 +2,111 @@
 //  HomeView.swift
 //  VBTTracker
 //
-//  MODIFICHE: Aggiunto link Test Multi-Axis nella sezione Quick Actions
+//  Vista principale con accesso a storico allenamenti
 //
 
 import SwiftUI
 
 struct HomeView: View {
     @StateObject private var bleManager = BLEManager()
-    @ObservedObject var settings = SettingsManager.shared
     @StateObject private var calibrationManager = CalibrationManager()
     
     @State private var showSettings = false
+    @State private var showHistory = false
+    @State private var showConnectionView = false
     
     var body: some View {
         NavigationStack {
             ZStack {
                 // Background gradient
                 LinearGradient(
-                    colors: [Color.blue.opacity(0.1), Color.purple.opacity(0.05)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
+                    colors: [Color.black, Color(white: 0.1)],
+                    startPoint: .top,
+                    endPoint: .bottom
                 )
                 .ignoresSafeArea()
                 
-                ScrollView {
-                    VStack(spacing: 24) {
-                        // Hero Section
-                        heroSection
+                VStack(spacing: 30) {
+                    Spacer()
+                    
+                    // Logo & Title
+                    VStack(spacing: 12) {
+                        Image(systemName: "figure.strengthtraining.traditional")
+                            .font(.system(size: 80))
+                            .foregroundStyle(
+                                LinearGradient(
+                                    colors: [.blue, .cyan],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
                         
-                        // Sensor Status Card
-                        sensorStatusCard
+                        Text("VBT Tracker")
+                            .font(.system(size: 42, weight: .bold, design: .rounded))
                         
-                        // Quick Actions
-                        quickActionsSection
+                        Text("Velocity-Based Training")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
                         
-                        // Training Zones Preview
-                        trainingZonesPreview
+                        Text("by Lorenzo Franceschini")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
                     }
-                    .padding()
+                    
+                    Spacer()
+                    
+                    // Connection Status
+                    connectionStatusCard
+                    
+                    // Main Actions
+                    VStack(spacing: 16) {
+                        // Start Training Button
+                        NavigationLink(destination: TrainingSelectionView(
+                            bleManager: bleManager
+                        )) {
+                            Label("Inizia Allenamento", systemImage: "play.circle.fill")
+                                .font(.headline)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 56)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(!bleManager.isConnected || !bleManager.isCalibrated)
+                        
+                        // Connect Sensor Button (if not connected)
+                        /*if !bleManager.isConnected {
+                            Button(action: {
+                                showConnectionView = true
+                            }) {
+                                Label("Connetti Sensore", systemImage: "sensor.fill")
+                                    .font(.headline)
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 56)
+                            }
+                            .buttonStyle(.bordered)
+                        }*/
+                    }
+                    .padding(.horizontal)
+                    
+                    Spacer()
                 }
             }
-            .navigationTitle("VBT Tracker")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button(action: {
+                        showHistory = true
+                    }) {
+                        Image(systemName: "clock.arrow.circlepath")
+                            .font(.title3)
+                    }
+                }
+                
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: { showSettings = true }) {
+                    Button(action: {
+                        showSettings = true
+                    }) {
                         Image(systemName: "gearshape.fill")
-                            .foregroundStyle(.blue)
+                            .font(.title3)
                     }
                 }
             }
@@ -57,274 +116,91 @@ struct HomeView: View {
                     calibrationManager: calibrationManager
                 )
             }
-            .onAppear {
-                loadSavedCalibration()
-                attemptAutoConnect()
+            .sheet(isPresented: $showHistory) {
+                TrainingHistoryView()
             }
-        }
-    }
-    
-    // MARK: - Hero Section
-    
-    private var heroSection: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "figure.strengthtraining.traditional")
-                .font(.system(size: 70))
-                .foregroundStyle(
-                    LinearGradient(
-                        colors: [.blue, .purple],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
+            .sheet(isPresented: $showConnectionView) {
+                NavigationStack {
+                    SensorSettingsView(
+                        bleManager: bleManager,
+                        calibrationManager: calibrationManager
                     )
-                )
-            
-            Text("Velocity Based Training")
-                .font(.title2)
-                .fontWeight(.bold)
-            
-            Text("Allena con precisione scientifica")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-        }
-        .padding(.vertical)
-    }
-    
-    // MARK: - Sensor Status Card
-    
-    private var sensorStatusCard: some View {
-        VStack(spacing: 16) {
-            HStack {
-                Circle()
-                    .fill(bleManager.isConnected ? Color.green : Color.gray)
-                    .frame(width: 12, height: 12)
-                
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(bleManager.sensorName)
-                        .font(.headline)
-                    
-                    Text(bleManager.statusMessage)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                
-                Spacer()
-                
-                // Calibration badge
-                if bleManager.isCalibrated {
-                    HStack(spacing: 4) {
-                        Image(systemName: "checkmark.seal.fill")
-                            .font(.caption2)
-                        Text("Calibrato")
-                            .font(.caption2)
-                    }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Color.green)
-                    .cornerRadius(8)
                 }
             }
-            
-            // Connection button if not connected
-            if !bleManager.isConnected {
-                Button(action: { showSettings = true }) {
-                    Label("Connetti Sensore", systemImage: "sensor.fill")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-            }
-        }
-        .padding()
-        .background(Color(.systemBackground))
-        .cornerRadius(16)
-        .shadow(color: .black.opacity(0.1), radius: 5, x: 0, y: 2)
-    }
-    
-    // MARK: - Quick Actions
-    
-    private var quickActionsSection: some View {
-        VStack(spacing: 16) {
-            Text("Azioni Rapide")
-                .font(.headline)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            
-            // Start Training (main CTA)
-            NavigationLink(destination: TrainingSelectionView(
-                bleManager: bleManager
-            )) {
-                HStack {
-                    Image(systemName: "play.circle.fill")
-                        .font(.title2)
-                    
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Inizia Allenamento")
-                            .font(.headline)
-                        Text("Scegli obiettivo e inizia")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    
-                    Spacer()
-                    
-                    Image(systemName: "chevron.right")
-                        .foregroundStyle(.secondary)
-                }
-                .padding()
-                .background(
-                    LinearGradient(
-                        colors: [Color.blue, Color.blue.opacity(0.8)],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                )
-                .foregroundStyle(.white)
-                .cornerRadius(16)
-                .shadow(color: .blue.opacity(0.3), radius: 8, x: 0, y: 4)
-            }
-            .disabled(!bleManager.isConnected || !bleManager.isCalibrated)
-            
-            // ⭐ NUOVO: Test Multi-Axis Detection (DEBUG)
-            NavigationLink(destination: TestMultiAxisView(bleManager: bleManager)) {
-                HStack {
-                    Image(systemName: "ant.circle.fill")
-                        .font(.title2)
-                    
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Test Multi-Axis Detection")
-                            .font(.headline)
-                        Text("Debug: Z-only vs Multi-Axis+Gyro")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    
-                    Spacer()
-                    
-                    Image(systemName: "chevron.right")
-                        .foregroundStyle(.secondary)
-                }
-                .padding()
-                .background(Color.purple.opacity(0.15))
-                .foregroundStyle(.purple)
-                .cornerRadius(12)
-            }
-            .disabled(!bleManager.isConnected)
         }
     }
     
-    // MARK: - Training Zones Preview
+    // MARK: - Connection Status Card
     
-    private var trainingZonesPreview: some View {
+    private var connectionStatusCard: some View {
         VStack(spacing: 12) {
-            HStack {
-                Text("Zone di Allenamento")
-                    .font(.headline)
+            HStack(spacing: 12) {
+                // Sensor Status
+                StatusIndicator(
+                    icon: "sensor.fill",
+                    label: "Sensore",
+                    isActive: bleManager.isConnected,
+                    activeText: bleManager.sensorName,
+                    inactiveText: "Non connesso"
+                )
                 
-                Spacer()
-                
-                Button(action: { showSettings = true }) {
-                    Text("Modifica")
-                        .font(.caption)
-                        .foregroundStyle(.blue)
-                }
-            }
-            
-            VStack(spacing: 8) {
-                TrainingZoneRow(
-                    zone: .maxStrength,
-                    range: settings.velocityRanges.maxStrength
-                )
-                TrainingZoneRow(
-                    zone: .strength,
-                    range: settings.velocityRanges.strength
-                )
-                TrainingZoneRow(
-                    zone: .strengthSpeed,
-                    range: settings.velocityRanges.strengthSpeed
-                )
-                TrainingZoneRow(
-                    zone: .speed,
-                    range: settings.velocityRanges.speed
+                // Calibration Status
+                StatusIndicator(
+                    icon: "scope",
+                    label: "Calibrazione",
+                    isActive: bleManager.isCalibrated,
+                    activeText: "Calibrato",
+                    inactiveText: "Non calibrato"
                 )
             }
         }
         .padding()
-        .background(Color(.systemBackground))
+        .background(Color.white.opacity(0.05))
         .cornerRadius(16)
-        .shadow(color: .black.opacity(0.1), radius: 5, x: 0, y: 2)
-    }
-    
-    // MARK: - Helper Methods
-    
-    private func loadSavedCalibration() {
-        if let calibration = settings.savedCalibration {
-            bleManager.applyCalibration(calibration)
-            print("📥 Calibrazione caricata da settings")
-        }
-    }
-    
-    private func attemptAutoConnect() {
-        // TODO: Implement auto-reconnect to last sensor
-        if let mac = settings.lastConnectedSensorMAC {
-            print("🔄 Tentativo auto-connessione a: \(mac)")
-            // bleManager.connectToMAC(mac)
-        }
+        .padding(.horizontal)
     }
 }
 
-// MARK: - Supporting Views
+// MARK: - Status Indicator
 
-struct QuickActionCard: View {
+struct StatusIndicator: View {
     let icon: String
-    let title: String
-    let color: Color
+    let label: String
+    let isActive: Bool
+    let activeText: String
+    let inactiveText: String
     
     var body: some View {
         VStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(.title2)
-                .foregroundStyle(color)
-            
-            Text(title)
-                .font(.caption)
-                .fontWeight(.medium)
-        }
-        .frame(maxWidth: .infinity)
-        .padding()
-        .background(color.opacity(0.1))
-        .cornerRadius(12)
-    }
-}
-
-struct TrainingZoneRow: View {
-    let zone: TrainingZone
-    let range: ClosedRange<Double>
-    
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: zone.icon)
-                .font(.title3)
-                .foregroundStyle(zone.color)
-                .frame(width: 30)
-            
-            VStack(alignment: .leading, spacing: 2) {
-                Text(zone.rawValue)
-                    .font(.subheadline)
-                    .fontWeight(.medium)
+            ZStack {
+                Circle()
+                    .fill(isActive ? Color.green.opacity(0.2) : Color.gray.opacity(0.2))
+                    .frame(width: 50, height: 50)
                 
-                Text("\(String(format: "%.2f", range.lowerBound)) - \(String(format: "%.2f", range.upperBound)) m/s")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                Image(systemName: icon)
+                    .font(.title3)
+                    .foregroundStyle(isActive ? .green : .gray)
             }
             
-            Spacer()
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            
+            Text(isActive ? activeText : inactiveText)
+                .font(.caption)
+                .fontWeight(.medium)
+                .foregroundStyle(isActive ? .green : .gray)
         }
-        .padding(.vertical, 8)
-        .padding(.horizontal, 12)
-        .background(zone.color.opacity(0.1))
-        .cornerRadius(8)
+        .frame(maxWidth: .infinity)
     }
 }
 
-#Preview {
+// MARK: - Preview
+
+#Preview("Connected") {
+    HomeView()
+}
+
+#Preview("Disconnected") {
     HomeView()
 }
