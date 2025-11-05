@@ -26,7 +26,12 @@ struct TrainingSessionView: View {
 
     @State private var showSummary = false
     @State private var sessionData: TrainingSessionData?
-    
+
+    // Computed property to access bleManager
+    private var bleManager: BLEManager {
+        sensorManager.bleManager
+    }
+
     var body: some View {
         ZStack {
             // Background gradient
@@ -670,7 +675,7 @@ struct RepToastView: View {
 #Preview {
     NavigationStack {
         TrainingSessionView(
-            bleManager: BLEManager(),
+            sensorManager: UnifiedSensorManager(),
             targetZone: .strength,
             targetReps: 5,
             loadPercentage: 70

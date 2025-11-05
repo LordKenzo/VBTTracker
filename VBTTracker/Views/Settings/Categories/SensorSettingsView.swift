@@ -133,7 +133,7 @@ struct SensorSettingsView: View {
 
                         // ✅ NUOVO: Pulsante Rimuovi Calibrazione
                         Button(action: {
-                            sensorManager.bleManager.removeCalibration()
+                            sensorManager.removeCalibration()
                             calibrationManager.resetCalibration()
                         }) {
                             HStack {
@@ -258,7 +258,7 @@ struct SensorSettingsView: View {
             .onDisappear {
                 if let calibration = calibrationManager.currentCalibration {
                     settings.savedCalibration = calibration
-                    sensorManager.bleManager.applyCalibration(calibration)
+                    sensorManager.applyCalibration(calibration)
                 }
             }
         }

@@ -70,7 +70,7 @@ struct HomeView: View {
                                 .frame(height: 56)
                         }
                         .buttonStyle(.borderedProminent)
-                        .disabled(!sensorManager.isConnected || !sensorManager.isCalibrated)
+                        .disabled(!sensorManager.isConnected || (sensorManager.currentSensorType == .witmotion && !sensorManager.isCalibrated))
                         
                         // Connect Sensor Button (if not connected)
                         /*if !bleManager.isConnected {

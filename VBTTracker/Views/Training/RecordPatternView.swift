@@ -24,6 +24,11 @@ struct RecordPatternView: View {
 
     @State private var showDismissAlert = false
 
+    // Computed property to access bleManager
+    private var bleManager: BLEManager {
+        sensorManager.bleManager
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -436,5 +441,5 @@ struct RealTimeRecordingIndicator: View {
 // MARK: - Preview
 
 #Preview {
-    RecordPatternView(bleManager: BLEManager())
+    RecordPatternView(sensorManager: UnifiedSensorManager())
 }

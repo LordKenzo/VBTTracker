@@ -24,6 +24,7 @@ final class UnifiedSensorManager: ObservableObject {
             // Quando cambia il tipo, disconnetti il sensore attuale
             if oldValue != currentSensorType {
                 disconnectCurrentSensor()
+                refreshAggregatedState()
             }
         }
     }
@@ -178,5 +179,22 @@ final class UnifiedSensorManager: ObservableObject {
     func removeCalibration() {
         guard currentSensorType == .witmotion else { return }
         bleManager.removeCalibration()
+    }
+
+    // MARK: - State Management
+
+    private func refreshAggregatedState() {
+        switch currentSensorType {
+        case .witmotion:
+            isConnected = bleManager.isConnected
+            statusMessage = bleManager.statusMessage
+            sensorName = bleManager.sensorName
+            sampleRateHz = bleManager.sampleRateHz
+        case .arduino:
+            isConnected = arduinoManager.isConnected
+            statusMessage = arduinoManager.statusMessage
+            sensorName = arduinoManager.sensorName
+            sampleRateHz = arduinoManager.sampleRateHz
+        }
     }
 }
