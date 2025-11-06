@@ -197,15 +197,16 @@ final class DistanceBasedRepDetector: ObservableObject {
             idleStartTime = nil // Reset se non idle
         }
 
-        // ⚡ CALCOLA STATO DALLA VELOCITÀ invece di fidarsi del byte state
-        // La velocità Arduino è affidabile, lo stato no (config=3 richiede troppi sample consecutivi)
-        let calculatedState = calculateStateFromVelocity(velocity)
-        processStateFromArduino(currentSample: sample, arduinoState: calculatedState)
+        // ⚡ Rev5: FIDATI dello stato Arduino (ha median filter, EMA, hold timers, isteresi!)
+        // Lo stato è ora molto più affidabile grazie ai filtri sofisticati
+        processStateFromArduino(currentSample: sample, arduinoState: movementState)
     }
 
     // MARK: - Private Methods
 
-    /// Calcola lo stato di movimento dalla velocità (più affidabile del byte state Arduino)
+    /// [DEPRECATO per Rev5+] Calcola lo stato di movimento dalla velocità
+    /// Rev5 Arduino ha filtri sofisticati (median, EMA, hold), quindi si usa lo stato hardware.
+    /// Questo metodo resta per backward compatibility con firmware più vecchi.
     /// - Parameter velocity: Velocità in mm/s
     /// - Returns: Stato movimento calcolato
     private func calculateStateFromVelocity(_ velocity: Double) -> MovementState {

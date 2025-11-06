@@ -273,18 +273,19 @@ final class ArduinoBLEManager: NSObject, ObservableObject, DistanceSensorDataPro
         velocityFloat = velocityData.withUnsafeBytes { $0.load(as: Float.self) }
 
         // Estrai stato movimento (byte 10)
+        // Rev5 mapping: 0=IDLE, 1=CONCENTRIC(approaching), 2=ECCENTRIC(receding)
         let stateByte = bytes[10]
         let state: MovementState
         switch stateByte {
-        case 0:
-            state = .approaching  // Avvicinamento (LED rosso)
         case 1:
-            state = .receding     // Allontanamento (LED blu)
+            state = .approaching  // CONCENTRIC (LED rosso)
+        case 2:
+            state = .receding     // ECCENTRIC (LED blu)
         default:
-            state = .idle
+            state = .idle         // 0 = IDLE
         }
 
-        // 📊 LOG RAW dei dati Arduino (Rev3 - no config byte)
+        // 📊 LOG RAW dei dati Arduino (Rev5 - con filtri sofisticati)
         print("📊 ARDUINO RAW: dist=\(distanceRaw)mm, vel=\(String(format: "%.1f", velocityFloat))mm/s, state=\(stateByte)(\(state.displayName))")
 
         DispatchQueue.main.async {
