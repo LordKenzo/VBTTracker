@@ -538,9 +538,11 @@ struct TrainingSessionView: View {
                         isCalibrated: sensorManager.bleManager.isCalibrated
                     )
                 } else if settings.selectedSensorType == .arduino {
-                    // Processa dati di distanza
+                    // Processa dati di distanza con stato movimento dall'Arduino
                     distanceDetector.processSample(
                         distance: sensorManager.arduinoManager.distance,
+                        velocity: sensorManager.arduinoManager.velocity,
+                        movementState: sensorManager.arduinoManager.movementState,
                         timestamp: Date()
                     )
                 }

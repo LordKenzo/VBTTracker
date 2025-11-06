@@ -25,8 +25,10 @@ final class ArduinoBLEManager: NSObject, ObservableObject, DistanceSensorDataPro
 
     // Dati distanza
     @Published var distance: Double = 0.0           // in millimetri
+    @Published var velocity: Double = 0.0           // in mm/s (da Arduino)
     @Published var timestamp: UInt32 = 0
     @Published var movementState: MovementState = .idle
+    @Published var configValue: UInt8 = 3           // Numero transizioni richieste
 
     // MARK: - Private
     private var central: CBCentralManager!
@@ -248,8 +250,8 @@ final class ArduinoBLEManager: NSObject, ObservableObject, DistanceSensorDataPro
 
     // MARK: - Parsing pacchetto Arduino
     private func parseArduinoPacket(_ data: Data) {
-        guard data.count >= 8 else {
-            print("⚠️ Pacchetto troppo corto: \(data.count) bytes")
+        guard data.count >= 12 else {
+            print("⚠️ Pacchetto troppo corto: \(data.count) bytes (attesi 12)")
             return
         }
 
@@ -258,28 +260,38 @@ final class ArduinoBLEManager: NSObject, ObservableObject, DistanceSensorDataPro
         // Estrai distanza (primi 2 byte, little-endian)
         let distanceRaw = UInt16(bytes[0]) | (UInt16(bytes[1]) << 8)
 
-        // Estrai timestamp (4 byte, little-endian)
+        // Estrai timestamp (byte 2-5, little-endian)
         let timestampRaw = UInt32(bytes[2])
             | (UInt32(bytes[3]) << 8)
             | (UInt32(bytes[4]) << 16)
             | (UInt32(bytes[5]) << 24)
 
-        // Estrai stato movimento (1 byte)
-        let stateByte = bytes[6]
+        // Estrai velocità (byte 6-9, float little-endian)
+        var velocityFloat: Float = 0
+        let velocityData = Data(bytes[6..<10])
+        velocityFloat = velocityData.withUnsafeBytes { $0.load(as: Float.self) }
+
+        // Estrai stato movimento (byte 10)
+        let stateByte = bytes[10]
         let state: MovementState
         switch stateByte {
         case 0:
-            state = .approaching  // Concentrica (LED rosso)
+            state = .approaching  // Avvicinamento (LED rosso)
         case 1:
-            state = .receding     // Eccentrica (LED blu)
+            state = .receding     // Allontanamento (LED blu)
         default:
             state = .idle
         }
 
+        // Estrai valore configurazione (byte 11)
+        let configByte = bytes[11]
+
         DispatchQueue.main.async {
             self.distance = Double(distanceRaw)
+            self.velocity = Double(velocityFloat)
             self.timestamp = timestampRaw
             self.movementState = state
+            self.configValue = configByte
         }
 
         updateSRonPacket()

@@ -116,9 +116,21 @@ final class DistanceBasedRepDetector: ObservableObject {
     }
 
     /// Processa un nuovo campione di distanza
-    func processSample(distance: Double, timestamp: Date) {
-        // Calcola velocità da variazione di distanza
-        let velocity = calculateVelocity(distance: distance, timestamp: timestamp)
+    /// - Parameters:
+    ///   - distance: Distanza in millimetri dal sensore
+    ///   - velocity: Velocità in mm/s calcolata dall'Arduino
+    ///   - movementState: Stato movimento rilevato dall'Arduino
+    ///   - timestamp: Timestamp del campione
+    func processSample(distance: Double, velocity: Double, movementState: MovementState, timestamp: Date) {
+        // Spike filtering: scarta letture improbabili
+        if let lastSample = samples.last {
+            let distanceDelta = abs(distance - lastSample.distance)
+            // Se la distanza cambia più di 1000mm in un campione (~20ms), è uno spike
+            if distanceDelta > 1000 {
+                print("⚠️ Spike rilevato: \(String(format: "%.1f", lastSample.distance))mm → \(String(format: "%.1f", distance))mm, scartato")
+                return
+            }
+        }
 
         let sample = DistanceSample(timestamp: timestamp, distance: distance, velocity: velocity)
         samples.append(sample)
@@ -139,9 +151,9 @@ final class DistanceBasedRepDetector: ObservableObject {
             onUnrack?()
         }
 
-        // Processa stato
+        // Processa stato usando lo stato movimento dall'Arduino
         guard baselineDistance != nil, samples.count >= windowSize else { return }
-        processState(currentSample: sample)
+        processStateFromArduino(currentSample: sample, arduinoState: movementState)
     }
 
     // MARK: - Private Methods
@@ -169,6 +181,63 @@ final class DistanceBasedRepDetector: ObservableObject {
         }
     }
 
+    /// Processa lo stato usando il movimento state dall'Arduino (più affidabile)
+    private func processStateFromArduino(currentSample: DistanceSample, arduinoState: MovementState) {
+        let smoothedDist = smoothedDistances.last ?? currentSample.distance
+
+        switch state {
+        case .waitingDescent:
+            // Attende che Arduino rilevi approaching (eccentrica)
+            if arduinoState == .approaching {
+                state = .descending
+                eccentricStartTime = currentSample.timestamp
+                eccentricStartDistance = smoothedDist
+                onPhaseChange?(.descending)
+                print("⬇️ Inizio eccentrica a \(String(format: "%.1f", smoothedDist)) mm")
+            }
+
+        case .descending:
+            // In eccentrica, attende che Arduino rilevi receding (concentrica)
+            if arduinoState == .receding {
+                state = .waitingAscent
+                concentricStartTime = currentSample.timestamp
+                concentricStartDistance = smoothedDist
+                concentricPeakDistance = smoothedDist
+                concentricSamples = [currentSample]
+                print("🔄 Transizione a concentrica a \(String(format: "%.1f", smoothedDist)) mm")
+            }
+
+        case .waitingAscent:
+            // Conferma l'inizio della concentrica con 3 campioni consecutivi receding
+            concentricSamples.append(currentSample)
+
+            if arduinoState == .receding, concentricSamples.count >= 3 {
+                state = .ascending
+                onPhaseChange?(.ascending)
+                print("⬆️ Inizio concentrica confermata")
+            } else if arduinoState == .approaching {
+                // Falso positivo, torna a descending
+                state = .descending
+                concentricSamples.removeAll()
+                print("🔄 Falso positivo, torna a eccentrica")
+            }
+
+        case .ascending:
+            concentricSamples.append(currentSample)
+
+            // Traccia picco massimo
+            if smoothedDist > (concentricPeakDistance ?? 0) {
+                concentricPeakDistance = smoothedDist
+            }
+
+            // Rileva fine concentrica quando Arduino rileva idle (fermo al top)
+            if arduinoState == .idle, concentricSamples.count >= lookAheadSamples {
+                tryCompleteRep(currentSample: currentSample)
+            }
+        }
+    }
+
+    // Metodo legacy che calcola lo stato dalla velocità (mantenuto per riferimento)
     private func processState(currentSample: DistanceSample) {
         let smoothedDist = smoothedDistances.last ?? currentSample.distance
         let velocity = currentSample.velocity

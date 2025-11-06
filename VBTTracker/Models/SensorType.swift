@@ -70,6 +70,7 @@ protocol DistanceSensorDataProvider: ObservableObject {
 
     // Dati distanza
     var distance: Double { get }          // Distanza in millimetri
+    var velocity: Double { get }          // Velocità in mm/s (da Arduino)
     var timestamp: UInt32 { get }         // Timestamp dal sensore
     var movementState: MovementState { get } // Stato movimento dal sensore
 

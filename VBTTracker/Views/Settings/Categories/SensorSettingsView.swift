@@ -365,6 +365,20 @@ struct SensorSettingsView: View {
 
             Divider()
 
+            // Velocità
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Velocità (mm/s)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Text(String(format: "%.1f", sensorManager.arduinoManager.velocity))
+                    .font(.system(.body, design: .monospaced))
+                    .fontWeight(.semibold)
+                    .foregroundStyle(sensorManager.arduinoManager.velocity > 0 ? .green : sensorManager.arduinoManager.velocity < 0 ? .orange : .secondary)
+            }
+
+            Divider()
+
             // Stato Movimento
             VStack(alignment: .leading, spacing: 8) {
                 Text("Stato Movimento")
