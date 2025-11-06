@@ -12,6 +12,10 @@ import Combine
 
 final class DistanceBasedRepDetector: ObservableObject {
 
+    // MARK: - Thread Safety
+
+    private let queue = DispatchQueue(label: "com.vbttracker.repdetector", qos: .userInitiated)
+
     // MARK: - Configuration
 
     var sampleRateHz: Double = 50.0
@@ -92,6 +96,13 @@ final class DistanceBasedRepDetector: ObservableObject {
     // Baseline (distanza a riposo)
     private var baselineDistance: Double?
     private let BASELINE_SAMPLES = 20
+    private var idleStartTime: Date?
+    private let BASELINE_RECALIBRATION_IDLE_TIME: TimeInterval = 3.0
+
+    // State debouncing (per ignorare oscillazioni)
+    private var lastArduinoState: MovementState = .idle
+    private var consecutiveStateCount: Int = 0
+    private let MIN_CONSECUTIVE_STATE_CHANGES = 3  // Conferme necessarie prima di cambiare stato
 
     // Smoothing window
     private var windowSize: Int {
@@ -101,18 +112,23 @@ final class DistanceBasedRepDetector: ObservableObject {
     // MARK: - Public API
 
     func reset() {
-        samples.removeAll()
-        smoothedDistances.removeAll()
-        state = .waitingDescent
-        lastRepTime = nil
-        eccentricStartTime = nil
-        eccentricStartDistance = nil
-        concentricSamples.removeAll()
-        concentricStartTime = nil
-        concentricStartDistance = nil
-        concentricPeakDistance = nil
-        baselineDistance = nil
-        print("🔄 DistanceBasedRepDetector reset")
+        queue.sync {
+            samples.removeAll()
+            smoothedDistances.removeAll()
+            state = .waitingDescent
+            lastRepTime = nil
+            eccentricStartTime = nil
+            eccentricStartDistance = nil
+            concentricSamples.removeAll()
+            concentricStartTime = nil
+            concentricStartDistance = nil
+            concentricPeakDistance = nil
+            baselineDistance = nil
+            idleStartTime = nil
+            lastArduinoState = .idle
+            consecutiveStateCount = 0
+            print("🔄 DistanceBasedRepDetector reset")
+        }
     }
 
     /// Processa un nuovo campione di distanza
@@ -122,6 +138,12 @@ final class DistanceBasedRepDetector: ObservableObject {
     ///   - movementState: Stato movimento rilevato dall'Arduino
     ///   - timestamp: Timestamp del campione
     func processSample(distance: Double, velocity: Double, movementState: MovementState, timestamp: Date) {
+        queue.sync {
+            processSampleUnsafe(distance: distance, velocity: velocity, movementState: movementState, timestamp: timestamp)
+        }
+    }
+
+    private func processSampleUnsafe(distance: Double, velocity: Double, movementState: MovementState, timestamp: Date) {
         // Spike filtering: scarta letture improbabili
         if let lastSample = samples.last {
             let distanceDelta = abs(distance - lastSample.distance)
@@ -151,18 +173,73 @@ final class DistanceBasedRepDetector: ObservableObject {
             onUnrack?()
         }
 
-        // Processa stato usando lo stato movimento dall'Arduino
         guard baselineDistance != nil, samples.count >= windowSize else { return }
-        processStateFromArduino(currentSample: sample, arduinoState: movementState)
+
+        // Ricalibra baseline se idle per >3s
+        if state == .waitingDescent {
+            if idleStartTime == nil {
+                idleStartTime = timestamp
+            } else if let idleStart = idleStartTime,
+                      timestamp.timeIntervalSince(idleStart) > BASELINE_RECALIBRATION_IDLE_TIME {
+                let recentSamples = samples.suffix(BASELINE_SAMPLES)
+                if recentSamples.count == BASELINE_SAMPLES {
+                    let newBaseline = recentSamples.map(\.distance).reduce(0, +) / Double(BASELINE_SAMPLES)
+                    if abs(newBaseline - (baselineDistance ?? 0)) > 20.0 { // cambio significativo
+                        baselineDistance = newBaseline
+                        print("📏 Baseline ricalibrata: \(String(format: "%.1f", newBaseline)) mm")
+                    }
+                }
+                idleStartTime = nil // Reset timer
+            }
+        } else {
+            idleStartTime = nil // Reset se non idle
+        }
+
+        // Applica state debouncing prima di processare
+        let debouncedState = applyStateDebouncing(arduinoState: movementState)
+
+        // Processa stato usando lo stato movimento dall'Arduino (con debouncing)
+        processStateFromArduino(currentSample: sample, arduinoState: debouncedState)
     }
 
     // MARK: - Private Methods
+
+    /// Applica debouncing sullo stato Arduino per ignorare oscillazioni
+    private func applyStateDebouncing(arduinoState: MovementState) -> MovementState {
+        // Se lo stato è lo stesso, incrementa contatore
+        if arduinoState == lastArduinoState {
+            consecutiveStateCount += 1
+        } else {
+            // Nuovo stato, reset contatore
+            lastArduinoState = arduinoState
+            consecutiveStateCount = 1
+        }
+
+        // Ritorna lo stato solo se confermato per N campioni consecutivi
+        if consecutiveStateCount >= MIN_CONSECUTIVE_STATE_CHANGES {
+            return arduinoState
+        } else {
+            // Mantieni stato precedente fino a conferma
+            // Determina lo stato "effettivo" attuale dal nostro state machine
+            switch state {
+            case .waitingDescent:
+                return .idle
+            case .descending:
+                return .approaching
+            case .waitingAscent, .ascending:
+                return .receding
+            }
+        }
+    }
 
     private func calculateVelocity(distance: Double, timestamp: Date) -> Double {
         guard let lastSample = samples.last else { return 0.0 }
 
         let dt = timestamp.timeIntervalSince(lastSample.timestamp)
-        guard dt > 0 else { return 0.0 }
+        let minDt = 1.0 / (sampleRateHz * 2.0)  // metà del periodo atteso
+
+        // Se dt troppo piccolo, mantieni velocità precedente
+        guard dt > minDt else { return lastSample.velocity }
 
         let dd = distance - lastSample.distance
         return dd / dt  // mm/s
@@ -376,6 +453,9 @@ final class DistanceBasedRepDetector: ObservableObject {
         concentricStartTime = nil
         concentricStartDistance = nil
         concentricPeakDistance = nil
+        if idleStartTime == nil {
+            idleStartTime = Date()
+        }
         onPhaseChange?(.idle)
     }
 }

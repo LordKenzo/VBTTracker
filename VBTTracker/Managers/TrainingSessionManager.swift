@@ -242,49 +242,56 @@ class TrainingSessionManager: ObservableObject {
     ) {
         guard isRecording else { return }
 
-        // Aggiorna contatori e storage
-        repCount += 1
-        repMeanPropulsiveVelocities.append(mpv)
-        repPeakPropulsiveVelocities.append(ppv)
-        repPeakVelocities.append(ppv)  // Per retrocompatibilità
+        DispatchQueue.main.async {
+            // Aggiorna contatori e storage
+            self.repCount += 1
+            self.repMeanPropulsiveVelocities.append(mpv)
+            self.repPeakPropulsiveVelocities.append(ppv)
+            self.repPeakVelocities.append(ppv)  // Per retrocompatibilità
 
-        // Prima rep: stabilisci baseline
-        if firstRepMPV == nil {
-            firstRepMPV = mpv
-            firstRepPPV = ppv
-            firstRepPeakVelocity = ppv
+            // Prima rep: stabilisci baseline
+            if self.firstRepMPV == nil {
+                self.firstRepMPV = mpv
+                self.firstRepPPV = ppv
+                self.firstRepPeakVelocity = ppv
+            }
+
+            // Aggiorna last rep
+            self.lastRepMPV = mpv
+            self.lastRepPPV = ppv
+            self.lastRepPeakVelocity = ppv
+            self.currentVelocity = ppv
+            self.meanPropulsiveVelocity = mpv
+            self.peakPropulsiveVelocity = ppv
+
+            // Chiama metodi helper per consistenza
+            self.calculateMeanVelocity()
+            self.calculateVelocityLoss()
+
+            // Determina zona
+            let zone = SettingsManager.shared.getTrainingZone(for: mpv)
+            self.currentZone = zone
+            self.lastRepInTarget = (zone == self.targetZone)
+
+            // Voice feedback
+            if SettingsManager.shared.voiceFeedbackEnabled {
+                self.voiceFeedback.announceRep(number: self.repCount, isInTarget: self.lastRepInTarget)
+            }
+
+            // Check velocity loss threshold (come in countRep)
+            if SettingsManager.shared.stopOnVelocityLoss &&
+               self.velocityLoss >= SettingsManager.shared.velocityLossThreshold {
+                self.voiceFeedback.announceVelocityLoss(percentage: self.velocityLoss)
+            }
+
+            let emoji = self.lastRepInTarget ? "✅" : "❌"
+            print("\(emoji) Rep #\(self.repCount) rilevata (Arduino)")
+            print("   • MPV: \(String(format: "%.3f", mpv)) m/s")
+            print("   • PPV: \(String(format: "%.3f", ppv)) m/s")
+            print("   • ROM: \(String(format: "%.3f", displacement)) m")
+            print("   • Durata: \(String(format: "%.2f", concentricDuration)) s")
+            print("   • Zona: \(zone.rawValue) \(self.lastRepInTarget ? "✅" : "❌")")
         }
-
-        // Calcola velocity loss
-        if let baseline = firstRepMPV {
-            let loss = ((baseline - mpv) / baseline) * 100.0
-            velocityLoss = max(0, loss)
-        }
-
-        // Aggiorna last rep
-        lastRepMPV = mpv
-        lastRepPPV = ppv
-        lastRepPeakVelocity = ppv
-        currentVelocity = ppv
-        meanPropulsiveVelocity = mpv
-        peakPropulsiveVelocity = ppv
-
-        // Determina zona
-        let zone = SettingsManager.shared.getTrainingZone(for: mpv)
-        currentZone = zone
-        lastRepInTarget = (zone == targetZone)
-
-        // Voice feedback
-        if SettingsManager.shared.voiceFeedbackEnabled {
-            voiceFeedback.announceRep(number: repCount, isInTarget: lastRepInTarget)
-        }
-
-        print("✅ Rep #\(repCount) rilevata (Arduino)")
-        print("   • MPV: \(String(format: "%.3f", mpv)) m/s")
-        print("   • PPV: \(String(format: "%.3f", ppv)) m/s")
-        print("   • ROM: \(String(format: "%.3f", displacement)) m")
-        print("   • Durata: \(String(format: "%.2f", concentricDuration)) s")
-        print("   • Zona: \(zone.rawValue) \(lastRepInTarget ? "✅" : "❌")")
     }
 
     // MARK: - Public Helpers
