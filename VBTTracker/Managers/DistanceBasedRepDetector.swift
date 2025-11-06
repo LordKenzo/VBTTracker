@@ -31,12 +31,14 @@ final class DistanceBasedRepDetector: ObservableObject {
 
     private var minROM: Double {
         let tolerance = SettingsManager.shared.customROMTolerance
-        return expectedROM * (1.0 - tolerance)
+        let calculated = expectedROM * (1.0 - tolerance)
+        // Aggiungi buffer di 10mm per evitare scarti per pochi millimetri
+        return max(calculated - 10.0, 50.0)  // Minimo assoluto 50mm
     }
 
     private var maxROM: Double {
         let tolerance = SettingsManager.shared.customROMTolerance
-        return expectedROM * (1.0 + tolerance)
+        return expectedROM * (1.0 + tolerance) + 10.0  // Aggiungi buffer di 10mm
     }
 
     // Soglie
