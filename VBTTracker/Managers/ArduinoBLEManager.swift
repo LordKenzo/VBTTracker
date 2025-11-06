@@ -273,14 +273,16 @@ final class ArduinoBLEManager: NSObject, ObservableObject, DistanceSensorDataPro
         velocityFloat = velocityData.withUnsafeBytes { $0.load(as: Float.self) }
 
         // Estrai stato movimento (byte 10)
-        // Rev5 mapping: 0=IDLE, 1=CONCENTRIC(approaching), 2=ECCENTRIC(receding)
+        // Rev5 con ORIENTATION_SIGN = +1 (sensore a terra):
+        //   - CONCENTRIC (1) = distanza aumenta = allontanamento → .receding
+        //   - ECCENTRIC (2) = distanza diminuisce = avvicinamento → .approaching
         let stateByte = bytes[10]
         let state: MovementState
         switch stateByte {
         case 1:
-            state = .approaching  // CONCENTRIC (LED rosso)
+            state = .receding     // CONCENTRIC con ORIENTATION_SIGN=+1 = allontanamento
         case 2:
-            state = .receding     // ECCENTRIC (LED blu)
+            state = .approaching  // ECCENTRIC con ORIENTATION_SIGN=+1 = avvicinamento
         default:
             state = .idle         // 0 = IDLE
         }
