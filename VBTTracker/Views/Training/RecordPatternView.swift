@@ -106,15 +106,6 @@ struct RecordPatternView: View {
                     recorder.addSample(accZ: accZ, timestamp: Date())
                 }
             }
-            .onAppear {
-                // Verifica che il sensore sia WitMotion
-                if settings.selectedSensorType != .witmotion {
-                    // Mostra alert e torna indietro
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                        dismiss()
-                    }
-                }
-            }
         }
     }
     

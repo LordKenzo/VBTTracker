@@ -104,6 +104,8 @@ struct SettingsView: View {
                             iconColor: .purple
                         )
                     }
+                    .disabled(settings.selectedSensorType != .witmotion)
+                    .opacity(settings.selectedSensorType != .witmotion ? 0.5 : 1.0)
 
                     NavigationLink(destination: RecordPatternView(sensorManager: sensorManager)) {
                         NavigationSettingRow(
@@ -114,6 +116,8 @@ struct SettingsView: View {
                             badge: "Nuovo"
                         )
                     }
+                    .disabled(settings.selectedSensorType != .witmotion)
+                    .opacity(settings.selectedSensorType != .witmotion ? 0.5 : 1.0)
                     
                     NavigationLink(destination: VelocitySettingsView()) {
                         NavigationSettingRow(
