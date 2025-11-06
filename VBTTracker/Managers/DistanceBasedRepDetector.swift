@@ -377,7 +377,7 @@ final class DistanceBasedRepDetector: ObservableObject {
               let startDist = concentricStartDistance,
               let peakDist = concentricPeakDistance,
               let eccentricStart = eccentricStartTime,
-              let eccentricStartDist = eccentricStartDistance
+              let _ = eccentricStartDistance  // Verifica esistenza ma non serve usarla
         else { return }
 
         let concentricDuration = currentSample.timestamp.timeIntervalSince(startTime)
