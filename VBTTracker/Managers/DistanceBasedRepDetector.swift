@@ -8,8 +8,9 @@
 //
 
 import Foundation
+import Combine
 
-final class DistanceBasedRepDetector {
+final class DistanceBasedRepDetector: ObservableObject {
 
     // MARK: - Configuration
 
