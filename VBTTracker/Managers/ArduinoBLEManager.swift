@@ -28,7 +28,7 @@ final class ArduinoBLEManager: NSObject, ObservableObject, DistanceSensorDataPro
     @Published var velocity: Double = 0.0           // in mm/s (da Arduino)
     @Published var timestamp: UInt32 = 0
     @Published var movementState: MovementState = .idle
-    @Published var configValue: UInt8 = 3           // Numero transizioni richieste
+    // configValue rimosso - non più usato in Rev3 (stato calcolato da velocità)
 
     // MARK: - Private
     private var central: CBCentralManager!
@@ -250,8 +250,9 @@ final class ArduinoBLEManager: NSObject, ObservableObject, DistanceSensorDataPro
 
     // MARK: - Parsing pacchetto Arduino
     private func parseArduinoPacket(_ data: Data) {
-        guard data.count >= 12 else {
-            print("⚠️ Pacchetto troppo corto: \(data.count) bytes (attesi 12)")
+        // Rev3: 11 byte (no config byte)
+        guard data.count >= 11 else {
+            print("⚠️ Pacchetto troppo corto: \(data.count) bytes (attesi 11)")
             return
         }
 
@@ -283,18 +284,14 @@ final class ArduinoBLEManager: NSObject, ObservableObject, DistanceSensorDataPro
             state = .idle
         }
 
-        // Estrai valore configurazione (byte 11)
-        let configByte = bytes[11]
-
-        // 📊 LOG RAW dei dati Arduino
-        print("📊 ARDUINO RAW: dist=\(distanceRaw)mm, vel=\(String(format: "%.1f", velocityFloat))mm/s, state=\(stateByte)(\(state.displayName)), config=\(configByte)")
+        // 📊 LOG RAW dei dati Arduino (Rev3 - no config byte)
+        print("📊 ARDUINO RAW: dist=\(distanceRaw)mm, vel=\(String(format: "%.1f", velocityFloat))mm/s, state=\(stateByte)(\(state.displayName))")
 
         DispatchQueue.main.async {
             self.distance = Double(distanceRaw)
             self.velocity = Double(velocityFloat)
             self.timestamp = timestampRaw
             self.movementState = state
-            self.configValue = configByte
         }
 
         updateSRonPacket()
