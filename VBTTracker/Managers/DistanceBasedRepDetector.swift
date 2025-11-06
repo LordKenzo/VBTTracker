@@ -18,7 +18,7 @@ final class DistanceBasedRepDetector: ObservableObject {
     var lookAheadSamples: Int = 10
 
     // ROM expected (in mm)
-    private var expectedROM: Double {
+    var expectedROM: Double {
         if SettingsManager.shared.useCustomROM {
             return SettingsManager.shared.customROM * 1000.0 // converti m -> mm
         }

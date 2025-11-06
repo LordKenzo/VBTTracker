@@ -276,10 +276,7 @@ class TrainingSessionManager: ObservableObject {
 
         // Voice feedback
         if SettingsManager.shared.voiceFeedbackEnabled {
-            voiceFeedback.announceRep(number: repCount, velocity: mpv)
-            if !lastRepInTarget {
-                voiceFeedback.announceOffTarget()
-            }
+            voiceFeedback.announceRep(number: repCount, isInTarget: lastRepInTarget)
         }
 
         print("✅ Rep #\(repCount) rilevata (Arduino)")
