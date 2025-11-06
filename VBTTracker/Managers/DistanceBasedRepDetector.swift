@@ -197,12 +197,31 @@ final class DistanceBasedRepDetector: ObservableObject {
             idleStartTime = nil // Reset se non idle
         }
 
-        // ⚡ SEMPLIFICATO: FIDATI dei dati Arduino (già fa debouncing hardware-side con N sample)
-        // Niente più debouncing app-side!
-        processStateFromArduino(currentSample: sample, arduinoState: movementState)
+        // ⚡ CALCOLA STATO DALLA VELOCITÀ invece di fidarsi del byte state
+        // La velocità Arduino è affidabile, lo stato no (config=3 richiede troppi sample consecutivi)
+        let calculatedState = calculateStateFromVelocity(velocity)
+        processStateFromArduino(currentSample: sample, arduinoState: calculatedState)
     }
 
     // MARK: - Private Methods
+
+    /// Calcola lo stato di movimento dalla velocità (più affidabile del byte state Arduino)
+    /// - Parameter velocity: Velocità in mm/s
+    /// - Returns: Stato movimento calcolato
+    private func calculateStateFromVelocity(_ velocity: Double) -> MovementState {
+        let VELOCITY_THRESHOLD = 100.0  // mm/s threshold per rilevare movimento
+
+        if velocity < -VELOCITY_THRESHOLD {
+            // Velocità negativa = si avvicina al sensore = concentrica (approaching)
+            return .approaching
+        } else if velocity > VELOCITY_THRESHOLD {
+            // Velocità positiva = si allontana dal sensore = eccentrica (receding)
+            return .receding
+        } else {
+            // Velocità bassa = fermo
+            return .idle
+        }
+    }
 
     private func calculateVelocity(distance: Double, timestamp: Date) -> Double {
         guard let lastSample = samples.last else { return 0.0 }
