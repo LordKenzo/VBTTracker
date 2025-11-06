@@ -99,11 +99,7 @@ final class DistanceBasedRepDetector: ObservableObject {
     private var idleStartTime: Date?
     private let BASELINE_RECALIBRATION_IDLE_TIME: TimeInterval = 3.0
 
-    // State debouncing (per ignorare oscillazioni)
-    private var lastArduinoState: MovementState = .idle
-    private var lastConfirmedState: MovementState = .idle  // Ultimo stato confermato
-    private var consecutiveStateCount: Int = 0
-    private let MIN_CONSECUTIVE_STATE_CHANGES = 3  // Conferme necessarie prima di cambiare stato
+    // State debouncing rimosso - Arduino lo fa già hardware-side
 
     // Smoothing window
     private var windowSize: Int {
@@ -126,9 +122,6 @@ final class DistanceBasedRepDetector: ObservableObject {
             concentricPeakDistance = nil
             baselineDistance = nil
             idleStartTime = nil
-            lastArduinoState = .idle
-            lastConfirmedState = .idle
-            consecutiveStateCount = 0
             print("🔄 DistanceBasedRepDetector reset")
         }
     }
@@ -204,37 +197,12 @@ final class DistanceBasedRepDetector: ObservableObject {
             idleStartTime = nil // Reset se non idle
         }
 
-        // Applica state debouncing prima di processare
-        let debouncedState = applyStateDebouncing(arduinoState: movementState)
-
-        // Processa stato usando lo stato movimento dall'Arduino (con debouncing)
-        processStateFromArduino(currentSample: sample, arduinoState: debouncedState)
+        // ⚡ SEMPLIFICATO: FIDATI dei dati Arduino (già fa debouncing hardware-side con N sample)
+        // Niente più debouncing app-side!
+        processStateFromArduino(currentSample: sample, arduinoState: movementState)
     }
 
     // MARK: - Private Methods
-
-    /// Applica debouncing sullo stato Arduino per ignorare oscillazioni
-    private func applyStateDebouncing(arduinoState: MovementState) -> MovementState {
-        // Se lo stato è lo stesso dell'ultimo ricevuto, incrementa contatore
-        if arduinoState == lastArduinoState {
-            consecutiveStateCount += 1
-        } else {
-            // Nuovo stato ricevuto, reset contatore
-            lastArduinoState = arduinoState
-            consecutiveStateCount = 1
-        }
-
-        // Ritorna lo stato solo se confermato per N campioni consecutivi
-        if consecutiveStateCount >= MIN_CONSECUTIVE_STATE_CHANGES {
-            // Stato confermato! Aggiorna lastConfirmedState e ritornalo
-            lastConfirmedState = arduinoState
-            print("🔄 Stato confermato: \(arduinoState.displayName) (dopo \(consecutiveStateCount) campioni)")
-            return arduinoState
-        } else {
-            // Non abbastanza conferme, mantieni l'ultimo stato confermato
-            return lastConfirmedState
-        }
-    }
 
     private func calculateVelocity(distance: Double, timestamp: Date) -> Double {
         guard let lastSample = samples.last else { return 0.0 }

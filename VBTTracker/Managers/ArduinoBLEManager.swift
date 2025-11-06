@@ -286,6 +286,9 @@ final class ArduinoBLEManager: NSObject, ObservableObject, DistanceSensorDataPro
         // Estrai valore configurazione (byte 11)
         let configByte = bytes[11]
 
+        // 📊 LOG RAW dei dati Arduino
+        print("📊 ARDUINO RAW: dist=\(distanceRaw)mm, vel=\(String(format: "%.1f", velocityFloat))mm/s, state=\(stateByte)(\(state.displayName)), config=\(configByte)")
+
         DispatchQueue.main.async {
             self.distance = Double(distanceRaw)
             self.velocity = Double(velocityFloat)
