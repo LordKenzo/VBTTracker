@@ -101,6 +101,7 @@ final class DistanceBasedRepDetector: ObservableObject {
 
     // State debouncing (per ignorare oscillazioni)
     private var lastArduinoState: MovementState = .idle
+    private var lastConfirmedState: MovementState = .idle  // Ultimo stato confermato
     private var consecutiveStateCount: Int = 0
     private let MIN_CONSECUTIVE_STATE_CHANGES = 3  // Conferme necessarie prima di cambiare stato
 
@@ -126,6 +127,7 @@ final class DistanceBasedRepDetector: ObservableObject {
             baselineDistance = nil
             idleStartTime = nil
             lastArduinoState = .idle
+            lastConfirmedState = .idle
             consecutiveStateCount = 0
             print("🔄 DistanceBasedRepDetector reset")
         }
@@ -175,7 +177,7 @@ final class DistanceBasedRepDetector: ObservableObject {
 
         guard baselineDistance != nil, samples.count >= windowSize else { return }
 
-        // Ricalibra baseline se idle per >3s
+        // Ricalibra baseline se idle per >3s E la distanza è stabile
         if state == .waitingDescent {
             if idleStartTime == nil {
                 idleStartTime = timestamp
@@ -183,10 +185,17 @@ final class DistanceBasedRepDetector: ObservableObject {
                       timestamp.timeIntervalSince(idleStart) > BASELINE_RECALIBRATION_IDLE_TIME {
                 let recentSamples = samples.suffix(BASELINE_SAMPLES)
                 if recentSamples.count == BASELINE_SAMPLES {
-                    let newBaseline = recentSamples.map(\.distance).reduce(0, +) / Double(BASELINE_SAMPLES)
-                    if abs(newBaseline - (baselineDistance ?? 0)) > 20.0 { // cambio significativo
-                        baselineDistance = newBaseline
-                        print("📏 Baseline ricalibrata: \(String(format: "%.1f", newBaseline)) mm")
+                    let distances = recentSamples.map(\.distance)
+                    let mean = distances.reduce(0, +) / Double(distances.count)
+
+                    // Calcola varianza per verificare stabilità
+                    let variance = distances.map { pow($0 - mean, 2) }.reduce(0, +) / Double(distances.count)
+                    let stdDev = sqrt(variance)
+
+                    // Ricalibra solo se STABILE (std dev < 10mm) E cambio significativo (>20mm)
+                    if stdDev < 10.0 && abs(mean - (baselineDistance ?? 0)) > 20.0 {
+                        baselineDistance = mean
+                        print("📏 Baseline ricalibrata: \(String(format: "%.1f", mean)) mm (σ=\(String(format: "%.1f", stdDev)))")
                     }
                 }
                 idleStartTime = nil // Reset timer
@@ -206,29 +215,24 @@ final class DistanceBasedRepDetector: ObservableObject {
 
     /// Applica debouncing sullo stato Arduino per ignorare oscillazioni
     private func applyStateDebouncing(arduinoState: MovementState) -> MovementState {
-        // Se lo stato è lo stesso, incrementa contatore
+        // Se lo stato è lo stesso dell'ultimo ricevuto, incrementa contatore
         if arduinoState == lastArduinoState {
             consecutiveStateCount += 1
         } else {
-            // Nuovo stato, reset contatore
+            // Nuovo stato ricevuto, reset contatore
             lastArduinoState = arduinoState
             consecutiveStateCount = 1
         }
 
         // Ritorna lo stato solo se confermato per N campioni consecutivi
         if consecutiveStateCount >= MIN_CONSECUTIVE_STATE_CHANGES {
+            // Stato confermato! Aggiorna lastConfirmedState e ritornalo
+            lastConfirmedState = arduinoState
+            print("🔄 Stato confermato: \(arduinoState.displayName) (dopo \(consecutiveStateCount) campioni)")
             return arduinoState
         } else {
-            // Mantieni stato precedente fino a conferma
-            // Determina lo stato "effettivo" attuale dal nostro state machine
-            switch state {
-            case .waitingDescent:
-                return .idle
-            case .descending:
-                return .approaching
-            case .waitingAscent, .ascending:
-                return .receding
-            }
+            // Non abbastanza conferme, mantieni l'ultimo stato confermato
+            return lastConfirmedState
         }
     }
 
@@ -264,18 +268,23 @@ final class DistanceBasedRepDetector: ObservableObject {
 
         switch state {
         case .waitingDescent:
-            // Attende che Arduino rilevi approaching (eccentrica)
-            if arduinoState == .approaching {
+            // Attende che Arduino rilevi receding (eccentrica = allontanamento dal sensore)
+            if arduinoState == .receding {
                 state = .descending
                 eccentricStartTime = currentSample.timestamp
                 eccentricStartDistance = smoothedDist
                 onPhaseChange?(.descending)
                 print("⬇️ Inizio eccentrica a \(String(format: "%.1f", smoothedDist)) mm")
+            } else {
+                // Debug: log quando non iniziamo eccentrica
+                if arduinoState != .idle {
+                    print("🔍 waitingDescent: ricevuto \(arduinoState.displayName) (aspettavo receding)")
+                }
             }
 
         case .descending:
-            // In eccentrica, attende che Arduino rilevi receding (concentrica)
-            if arduinoState == .receding {
+            // In eccentrica, attende che Arduino rilevi approaching (concentrica = avvicinamento al sensore)
+            if arduinoState == .approaching {
                 state = .waitingAscent
                 concentricStartTime = currentSample.timestamp
                 concentricStartDistance = smoothedDist
@@ -285,14 +294,14 @@ final class DistanceBasedRepDetector: ObservableObject {
             }
 
         case .waitingAscent:
-            // Conferma l'inizio della concentrica con 3 campioni consecutivi receding
+            // Conferma l'inizio della concentrica con 3 campioni consecutivi approaching
             concentricSamples.append(currentSample)
 
-            if arduinoState == .receding, concentricSamples.count >= 3 {
+            if arduinoState == .approaching, concentricSamples.count >= 3 {
                 state = .ascending
                 onPhaseChange?(.ascending)
                 print("⬆️ Inizio concentrica confermata")
-            } else if arduinoState == .approaching {
+            } else if arduinoState == .receding {
                 // Falso positivo, torna a descending
                 state = .descending
                 concentricSamples.removeAll()
@@ -302,8 +311,8 @@ final class DistanceBasedRepDetector: ObservableObject {
         case .ascending:
             concentricSamples.append(currentSample)
 
-            // Traccia picco massimo
-            if smoothedDist > (concentricPeakDistance ?? 0) {
+            // Traccia picco massimo (distanza minima = bilanciere più vicino al sensore)
+            if smoothedDist < (concentricPeakDistance ?? Double.infinity) {
                 concentricPeakDistance = smoothedDist
             }
 
@@ -385,8 +394,10 @@ final class DistanceBasedRepDetector: ObservableObject {
         let eccentricDuration = startTime.timeIntervalSince(eccentricStart)
         let totalDuration = concentricDuration + eccentricDuration
 
-        // Displacement (ROM) in mm
-        let displacementMM = abs(peakDist - startDist)
+        // Displacement (ROM) in mm: dal fondo (inizio concentrica) al top (picco concentrica)
+        // startDist = dove inizia concentrica (fondo, distanza massima)
+        // peakDist = picco concentrica (top, distanza minima)
+        let displacementMM = abs(startDist - peakDist)
 
         // Validazioni
         guard concentricDuration >= MIN_CONCENTRIC_DURATION else {
