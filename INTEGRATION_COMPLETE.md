@@ -30,10 +30,10 @@ L'implementazione del sensore Arduino con VL53L0X è stata completata! La tua ap
 - `TrainingSessionView.swift` - **Cuore dell'integrazione**
 - `RecordPatternView.swift`
 
-### Righe di Codice
-- **Nuove**: ~2000 righe
-- **Modificate**: ~500 righe
-- **Totale**: 2500+ righe
+### Righe di Codice (Swift)
+- **Nuove**: ~1050 righe (4 nuovi file)
+- **Modificate**: ~475 righe (14 file modificati)
+- **Totale**: ~1525 righe Swift + documentazione
 
 ---
 
