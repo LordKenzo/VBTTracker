@@ -30,6 +30,10 @@ final class ArduinoBLEManager: NSObject, ObservableObject, DistanceSensorDataPro
     @Published var movementState: MovementState = .idle
     // configValue rimosso - non più usato in Rev3 (stato calcolato da velocità)
 
+    // Campioni distanza per grafico real-time
+    private var distanceSamples: [DistanceSample] = []
+    private let maxDistanceSamples = 200 // 4 secondi a 50Hz
+
     // MARK: - Private
     private var central: CBCentralManager!
     private var connectedPeripheral: CBPeripheral?
@@ -175,6 +179,10 @@ final class ArduinoBLEManager: NSObject, ObservableObject, DistanceSensorDataPro
         print("🔍 Scansione fermata - Trovati \(discoveredDevices.count) dispositivi")
     }
 
+    func getDistanceSamples() -> [DistanceSample] {
+        return distanceSamples
+    }
+
 
     // MARK: - Sample rate estimation
 
@@ -184,6 +192,7 @@ final class ArduinoBLEManager: NSObject, ObservableObject, DistanceSensorDataPro
         packetTimestamps.removeAll()
         lastPublishedSR = nil
         srStableCounter = 0
+        distanceSamples.removeAll()
     }
 
     private var lastSRNotifyTime: Date = .distantPast
@@ -295,6 +304,19 @@ final class ArduinoBLEManager: NSObject, ObservableObject, DistanceSensorDataPro
             self.velocity = Double(velocityFloat)
             self.timestamp = timestampRaw
             self.movementState = state
+
+            // Aggiungi campione per grafico real-time
+            let sample = DistanceSample(
+                timestamp: Date(),
+                distance: Double(distanceRaw),
+                velocity: Double(velocityFloat)
+            )
+            self.distanceSamples.append(sample)
+
+            // Limita dimensione array
+            if self.distanceSamples.count > self.maxDistanceSamples {
+                self.distanceSamples.removeFirst()
+            }
         }
 
         updateSRonPacket()
