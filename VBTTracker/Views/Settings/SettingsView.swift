@@ -169,7 +169,7 @@ struct SettingsView: View {
                             .foregroundStyle(.red)
                             .frame(width: 24)
                         
-                        Text("Sviluppato per Scienze Motorie")
+                        Text("Sviluppo Tesi Ing. Informatica")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
