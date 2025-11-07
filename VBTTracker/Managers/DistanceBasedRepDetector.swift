@@ -258,7 +258,8 @@ final class DistanceBasedRepDetector: ObservableObject {
 
         switch state {
         case .waitingDescent:
-            // Attende che Arduino rilevi receding (eccentrica = allontanamento dal sensore)
+            // Attende che Arduino rilevi .receding (fase eccentrica del movimento)
+            // Con sensore a terra: bilanciere scende → distanza diminuisce → Arduino ECCENTRIC → Swift .receding
             if arduinoState == .receding {
                 state = .descending
                 eccentricStartTime = currentSample.timestamp
@@ -268,12 +269,13 @@ final class DistanceBasedRepDetector: ObservableObject {
             } else {
                 // Debug: log quando non iniziamo eccentrica
                 if arduinoState != .idle {
-                    print("🔍 waitingDescent: ricevuto \(arduinoState.displayName) (aspettavo receding)")
+                    print("🔍 waitingDescent: ricevuto \(arduinoState.displayName) (aspettavo Eccentrica)")
                 }
             }
 
         case .descending:
-            // In eccentrica, attende che Arduino rilevi approaching (concentrica = avvicinamento al sensore)
+            // In eccentrica, attende che Arduino rilevi .approaching (fase concentrica del movimento)
+            // Con sensore a terra: bilanciere sale → distanza aumenta → Arduino CONCENTRIC → Swift .approaching
             if arduinoState == .approaching {
                 state = .waitingAscent
                 concentricStartTime = currentSample.timestamp
@@ -284,7 +286,7 @@ final class DistanceBasedRepDetector: ObservableObject {
             }
 
         case .waitingAscent:
-            // Conferma l'inizio della concentrica con 3 campioni consecutivi approaching
+            // Conferma l'inizio della concentrica con 3 campioni consecutivi .approaching
             concentricSamples.append(currentSample)
 
             if arduinoState == .approaching, concentricSamples.count >= 3 {
@@ -301,7 +303,8 @@ final class DistanceBasedRepDetector: ObservableObject {
         case .ascending:
             concentricSamples.append(currentSample)
 
-            // Traccia picco massimo (distanza minima = bilanciere più vicino al sensore)
+            // Traccia picco massimo della concentrica (distanza minima = bilanciere più vicino al sensore)
+            // Con sensore a terra: il "picco" della concentrica è quando il bilanciere è più in alto (distanza minima)
             if smoothedDist < (concentricPeakDistance ?? Double.infinity) {
                 concentricPeakDistance = smoothedDist
             }
