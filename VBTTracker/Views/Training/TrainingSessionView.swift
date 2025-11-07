@@ -349,16 +349,26 @@ struct TrainingSessionView: View {
     }
     
     // MARK: - 3. Compact Graph Card
-    
+
     private var compactGraphCard: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("ACCELERAZIONE")
-                .font(.caption)
-                .fontWeight(.semibold)
-                .foregroundStyle(.secondary)
-            
-            RealTimeAccelerationGraph(data: sessionManager.getAccelerationSamples())
-                .frame(height: 120)
+            if settings.selectedSensorType == .arduino {
+                Text("DISTANZA")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.secondary)
+
+                RealTimeDistanceGraph(data: sensorManager.arduinoManager.getDistanceSamples())
+                    .frame(height: 120)
+            } else {
+                Text("ACCELERAZIONE")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.secondary)
+
+                RealTimeAccelerationGraph(data: sessionManager.getAccelerationSamples())
+                    .frame(height: 120)
+            }
         }
         .padding()
         .background(Color(.systemBackground))
