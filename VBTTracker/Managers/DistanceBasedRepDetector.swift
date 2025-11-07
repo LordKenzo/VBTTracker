@@ -433,14 +433,19 @@ final class DistanceBasedRepDetector: ObservableObject {
     private func calculateVelocityMetrics() -> (mpv: Double, ppv: Double) {
         guard !concentricSamples.isEmpty else { return (0.0, 0.0) }
 
-        // Converti velocità da mm/s a m/s
-        let velocities = concentricSamples.map { $0.velocity / 1000.0 }
+        // Converti velocità da mm/s a m/s e usa VALORE ASSOLUTO
+        // Arduino con ORIENTATION_SIGN=+1 (sensore a terra):
+        //   - Concentrica (approaching) = velocità negativa (distanza diminuisce)
+        //   - Eccentrica (receding) = velocità positiva (distanza aumenta)
+        // Quindi nella fase concentrica le velocità sono negative, ma noi vogliamo la magnitudine!
+        let velocities = concentricSamples.map { abs($0.velocity) / 1000.0 }
 
         // PPV (Peak Propulsive Velocity) = massima velocità durante concentrica
         let ppv = velocities.max() ?? 0.0
 
-        // MPV (Mean Propulsive Velocity) = media delle velocità positive
-        let propulsiveVelocities = velocities.filter { $0 > 0 }
+        // MPV (Mean Propulsive Velocity) = media delle velocità (già tutte positive per abs)
+        // Filtriamo solo quelle significative (>0.01 m/s per evitare rumore)
+        let propulsiveVelocities = velocities.filter { $0 > 0.01 }
         let mpv = propulsiveVelocities.isEmpty ? 0.0 : propulsiveVelocities.reduce(0, +) / Double(propulsiveVelocities.count)
 
         return (mpv, ppv)
