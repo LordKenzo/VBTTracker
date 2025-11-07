@@ -377,20 +377,21 @@ final class DistanceBasedRepDetector: ObservableObject {
 
     private func tryCompleteRep(currentSample: DistanceSample) {
         guard let startTime = concentricStartTime,
-              let startDist = concentricStartDistance,
-              let peakDist = concentricPeakDistance,
+              let concentricStart = concentricStartDistance,
               let eccentricStart = eccentricStartTime,
-              let _ = eccentricStartDistance  // Verifica esistenza ma non serve usarla
+              let eccentricStartDist = eccentricStartDistance
         else { return }
 
         let concentricDuration = currentSample.timestamp.timeIntervalSince(startTime)
         let eccentricDuration = startTime.timeIntervalSince(eccentricStart)
         let totalDuration = concentricDuration + eccentricDuration
 
-        // Displacement (ROM) in mm: dal fondo (inizio concentrica) al top (picco concentrica)
-        // startDist = dove inizia concentrica (fondo, distanza massima)
-        // peakDist = picco concentrica (top, distanza minima)
-        let displacementMM = abs(startDist - peakDist)
+        // Displacement (ROM) in mm: differenza tra inizio eccentrica (top) e inizio concentrica (bottom)
+        // Con sensore a terra:
+        //   - eccentricStartDist = punto più alto (es: 523 mm)
+        //   - concentricStart = punto più basso (es: 135 mm)
+        //   - ROM = |523 - 135| = 388 mm ✅
+        let displacementMM = abs(eccentricStartDist - concentricStart)
 
         // Validazioni
         guard concentricDuration >= MIN_CONCENTRIC_DURATION else {
