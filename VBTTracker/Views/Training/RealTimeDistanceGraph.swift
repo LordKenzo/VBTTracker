@@ -21,60 +21,56 @@ struct RealTimeDistanceGraph: View {
         let maxDist = distances.max() ?? 1000
 
         // Aggiungi margine del 10% sopra e sotto
-        let margin = (maxDist - minDist) * 0.1
-        let lower = max(0, minDist - margin)
-        let upper = maxDist + margin
+        let range = maxDist - minDist
+        let margin = range * 0.1
+        let effectiveMargin = max(margin, range < 0.1 ? 50.0 : 0)  // margine minimo di 50mm
+        let lower = max(0, minDist - effectiveMargin)
+        let upper = maxDist + effectiveMargin
 
         return lower...upper
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Distanza Sensore Laser (mm)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+        Chart {
+            ForEach(Array(data.enumerated()), id: \.offset) { index, sample in
+                LineMark(
+                    x: .value("Sample", index),
+                    y: .value("Distance", sample.distance)
+                )
+                .foregroundStyle(.blue)
+                .lineStyle(StrokeStyle(lineWidth: 2))
 
-            Chart {
-                ForEach(Array(data.enumerated()), id: \.offset) { index, sample in
-                    LineMark(
+                // Marker per inizio rep (fase eccentrica)
+                if sample.isRepStart {
+                    PointMark(
                         x: .value("Sample", index),
                         y: .value("Distance", sample.distance)
                     )
-                    .foregroundStyle(.blue)
-                    .lineStyle(StrokeStyle(lineWidth: 2))
+                    .foregroundStyle(.green)
+                    .symbolSize(100)
+                }
 
-                    // Marker per inizio rep (fase eccentrica)
-                    if sample.isRepStart {
-                        PointMark(
-                            x: .value("Sample", index),
-                            y: .value("Distance", sample.distance)
-                        )
-                        .foregroundStyle(.green)
-                        .symbolSize(100)
-                    }
-
-                    // Marker per fine rep (fase concentrica)
-                    if sample.isRepEnd {
-                        PointMark(
-                            x: .value("Sample", index),
-                            y: .value("Distance", sample.distance)
-                        )
-                        .foregroundStyle(.orange)
-                        .symbolSize(100)
-                    }
+                // Marker per fine rep (fase concentrica)
+                if sample.isRepEnd {
+                    PointMark(
+                        x: .value("Sample", index),
+                        y: .value("Distance", sample.distance)
+                    )
+                    .foregroundStyle(.orange)
+                    .symbolSize(100)
                 }
             }
-            .chartYScale(domain: distanceRange)
-            .chartXAxis {
-                AxisMarks(values: .automatic(desiredCount: 5))
-            }
-            .chartYAxis {
-                AxisMarks(position: .leading)
-            }
-            .frame(height: 200)
-            .background(Color(.systemGray6))
-            .cornerRadius(12)
         }
+        .chartYScale(domain: distanceRange)
+        .chartXAxis {
+            AxisMarks(values: .automatic(desiredCount: 5))
+        }
+        .chartYAxis {
+            AxisMarks(position: .leading)
+        }
+        .frame(height: 200)
+        .background(Color(.systemGray6))
+        .cornerRadius(12)
     }
 }
 
