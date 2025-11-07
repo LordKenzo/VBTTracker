@@ -9,19 +9,25 @@
 import SwiftUI
 
 struct RecordPatternView: View {
-    @ObservedObject var bleManager: BLEManager
+    @ObservedObject var sensorManager: UnifiedSensorManager
+    @ObservedObject var settings = SettingsManager.shared
     @StateObject private var recorder = PatternRecorderManager()
-    
+
     @Environment(\.dismiss) var dismiss
-    
+
     // Form state
     @State private var showForm = false
     @State private var patternLabel = ""
     @State private var repCount = 5
     @State private var loadPercentage = ""
     @State private var useLoadPercentage = false
-    
+
     @State private var showDismissAlert = false
+
+    // Computed property to access bleManager
+    private var bleManager: BLEManager {
+        sensorManager.bleManager
+    }
 
     var body: some View {
         NavigationStack {
@@ -90,7 +96,10 @@ struct RecordPatternView: View {
                     showForm = true
                 }
             }
-            .onReceive(bleManager.$acceleration) { acceleration in
+            .onReceive(sensorManager.bleManager.$acceleration) { acceleration in
+                // Solo per WitMotion
+                guard settings.selectedSensorType == .witmotion else { return }
+
                 if recorder.isRecording, acceleration.count >= 3 {
                     // Estrai componente Z (indice 2) dall'array
                     let accZ = acceleration[2]
@@ -423,5 +432,5 @@ struct RealTimeRecordingIndicator: View {
 // MARK: - Preview
 
 #Preview {
-    RecordPatternView(bleManager: BLEManager())
+    RecordPatternView(sensorManager: UnifiedSensorManager())
 }

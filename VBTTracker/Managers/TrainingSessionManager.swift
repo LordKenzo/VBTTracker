@@ -233,8 +233,69 @@ class TrainingSessionManager: ObservableObject {
         }
     }
 
+    /// Aggiungi una ripetizione dal sensore di distanza (Arduino)
+    func addRepetitionFromDistance(
+        mpv: Double,
+        ppv: Double,
+        displacement: Double,
+        concentricDuration: TimeInterval
+    ) {
+        guard isRecording else { return }
+
+        DispatchQueue.main.async {
+            // Aggiorna contatori e storage
+            self.repCount += 1
+            self.repMeanPropulsiveVelocities.append(mpv)
+            self.repPeakPropulsiveVelocities.append(ppv)
+            self.repPeakVelocities.append(ppv)  // Per retrocompatibilità
+
+            // Prima rep: stabilisci baseline
+            if self.firstRepMPV == nil {
+                self.firstRepMPV = mpv
+                self.firstRepPPV = ppv
+                self.firstRepPeakVelocity = ppv
+            }
+
+            // Aggiorna last rep
+            self.lastRepMPV = mpv
+            self.lastRepPPV = ppv
+            self.lastRepPeakVelocity = ppv
+            self.currentVelocity = ppv
+            self.meanPropulsiveVelocity = mpv
+            self.peakPropulsiveVelocity = ppv
+
+            // Chiama metodi helper per consistenza
+            self.calculateMeanVelocity()
+            self.calculateVelocityLoss()
+
+            // Determina zona
+            let zone = SettingsManager.shared.getTrainingZone(for: mpv)
+            self.currentZone = zone
+            self.lastRepInTarget = (zone == self.targetZone)
+
+            // Voice feedback
+            if SettingsManager.shared.voiceFeedbackEnabled {
+                self.voiceFeedback.announceRep(number: self.repCount, isInTarget: self.lastRepInTarget)
+            }
+
+            // Check velocity loss threshold (come in countRep)
+            if SettingsManager.shared.stopOnVelocityLoss &&
+               self.velocityLoss >= SettingsManager.shared.velocityLossThreshold {
+                self.voiceFeedback.announceVelocityLoss(percentage: self.velocityLoss)
+            }
+
+            let emoji = self.lastRepInTarget ? "✅" : "❌"
+            print("\(emoji) Rep #\(self.repCount) rilevata (Arduino)")
+            print("   • MPV: \(String(format: "%.3f", mpv)) m/s")
+            print("   • PPV: \(String(format: "%.3f", ppv)) m/s")
+            print("   • ROM: \(String(format: "%.3f", displacement)) m")
+            print("   • Durata: \(String(format: "%.2f", concentricDuration)) s")
+            print("   • Zona: \(zone.rawValue) \(self.lastRepInTarget ? "✅" : "❌")")
+        }
+    }
+
     // MARK: - Public Helpers
-    
+
     func getAccelerationSamples() -> [AccelerationSample] {
         return repDetector.getSamples()
     }

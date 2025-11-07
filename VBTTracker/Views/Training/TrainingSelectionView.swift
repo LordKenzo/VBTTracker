@@ -8,11 +8,11 @@
 import SwiftUI
 
 struct TrainingSelectionView: View {
-    @ObservedObject var bleManager: BLEManager
-    
+    @ObservedObject var sensorManager: UnifiedSensorManager
+
     @State private var selectedZone: TrainingZone = .strength
     @State private var navigateToSession = false
-    
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -23,15 +23,15 @@ struct TrainingSelectionView: View {
                     endPoint: .bottom
                 )
                 .ignoresSafeArea()
-                
+
                 ScrollView {
                     VStack(spacing: 24) {
                         // Sensor Status
                         sensorStatusCard
-                        
+
                         // Zone Selection
                         zoneSelectionCard
-                        
+
                         // Start Button
                         startButton
                     }
@@ -42,7 +42,7 @@ struct TrainingSelectionView: View {
             .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(isPresented: $navigateToSession) {
                 RepTargetSelectionView(
-                    bleManager: bleManager,
+                    sensorManager: sensorManager,
                     targetZone: selectedZone
                 )
             }
@@ -54,26 +54,26 @@ struct TrainingSelectionView: View {
     private var sensorStatusCard: some View {
         HStack(spacing: 16) {
             Circle()
-                .fill(bleManager.isConnected ? Color.green : Color.red)
+                .fill(sensorManager.isConnected ? Color.green : Color.red)
                 .frame(width: 12, height: 12)
-            
+
             VStack(alignment: .leading, spacing: 4) {
                 Text("Sensore")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                
-                Text(bleManager.sensorName)
+
+                Text(sensorManager.sensorName)
                     .font(.headline)
                     .foregroundStyle(.white)
             }
-            
+
             Spacer()
-            
-            if bleManager.isCalibrated {
+
+            if sensorManager.isCalibrated {
                 HStack(spacing: 4) {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundStyle(.green)
-                    Text("Calibrato")
+                    Text(sensorManager.currentSensorType == .witmotion ? "Calibrato" : "Pronto")
                         .font(.caption)
                         .foregroundStyle(.green)
                 }
@@ -117,9 +117,9 @@ struct TrainingSelectionView: View {
             }
             .buttonStyle(.borderedProminent)
             .tint(.green)
-            .disabled(!bleManager.isConnected)
-            
-            if !bleManager.isConnected {
+            .disabled(!sensorManager.isConnected)
+
+            if !sensorManager.isConnected {
                 Text("Connetti il sensore per continuare")
                     .font(.caption)
                     .foregroundStyle(.red)
@@ -202,5 +202,5 @@ extension TrainingZone {
 // MARK: - Preview
 
 #Preview {
-    TrainingSelectionView(bleManager: BLEManager())
+    TrainingSelectionView(sensorManager: UnifiedSensorManager())
 }

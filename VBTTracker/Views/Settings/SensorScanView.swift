@@ -17,32 +17,51 @@ import SwiftUI
 import CoreBluetooth
 
 struct SensorScanView: View {
-    @ObservedObject var bleManager: BLEManager
+    @ObservedObject var sensorManager: UnifiedSensorManager
     @ObservedObject var settings = SettingsManager.shared
     @Environment(\.dismiss) var dismiss
+
+    // Helper per accedere al manager corrente
+    private var discoveredDevices: [CBPeripheral] {
+        switch settings.selectedSensorType {
+        case .witmotion:
+            return sensorManager.bleManager.discoveredDevices
+        case .arduino:
+            return sensorManager.arduinoManager.discoveredDevices
+        }
+    }
+
+    private var isScanning: Bool {
+        switch settings.selectedSensorType {
+        case .witmotion:
+            return sensorManager.bleManager.isScanning
+        case .arduino:
+            return sensorManager.arduinoManager.isScanning
+        }
+    }
     
     var body: some View {
         VStack(spacing: 20) {
             // Header
             VStack(spacing: 12) {
-                Image(systemName: "sensor.fill")
+                Image(systemName: settings.selectedSensorType.icon)
                     .font(.system(size: 60))
                     .foregroundStyle(.blue)
-                
+
                 Text("Cerca Sensori")
                     .font(.title2)
                     .fontWeight(.bold)
-                
-                Text("Accendi il sensore WitMotion e avvia la scansione")
+
+                Text(sensorTypeDescription)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             }
             .padding(.top)
-            
+
             // Scan Button
-            if !bleManager.isScanning {
-                Button(action: { bleManager.startScanning() }) {
+            if !isScanning {
+                Button(action: { sensorManager.startScanning() }) {
                     Label("Avvia Scansione", systemImage: "magnifyingglass")
                         .frame(maxWidth: .infinity)
                 }
@@ -52,32 +71,33 @@ struct SensorScanView: View {
                 VStack(spacing: 12) {
                     ProgressView()
                         .scaleEffect(1.5)
-                    
+
                     Text("Scansione in corso...")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
-                    
-                    Button(action: { bleManager.stopScanning() }) {
+
+                    Button(action: { sensorManager.stopScanning() }) {
                         Text("Ferma Scansione")
                     }
                     .buttonStyle(.bordered)
                 }
                 .padding()
             }
-            
+
             // Devices List
-            if !bleManager.discoveredDevices.isEmpty {
+            if !discoveredDevices.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Dispositivi Trovati")
                         .font(.headline)
                         .padding(.horizontal)
-                    
+
                     ScrollView {
                         VStack(spacing: 8) {
-                            ForEach(bleManager.discoveredDevices, id: \.identifier) { device in
+                            ForEach(discoveredDevices, id: \.identifier) { device in
                                 DeviceRow(
                                     device: device,
-                                    isLastConnected: device.address == settings.lastConnectedSensorMAC
+                                    isLastConnected: device.address == settings.lastConnectedSensorMAC,
+                                    sensorType: settings.selectedSensorType
                                 ) {
                                     connectToDevice(device)
                                 }
@@ -86,12 +106,12 @@ struct SensorScanView: View {
                         .padding(.horizontal)
                     }
                 }
-            } else if !bleManager.isScanning {
+            } else if !isScanning {
                 VStack(spacing: 12) {
                     Image(systemName: "wifi.slash")
                         .font(.system(size: 40))
                         .foregroundStyle(.gray)
-                    
+
                     Text("Nessun sensore trovato")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
@@ -106,13 +126,27 @@ struct SensorScanView: View {
         .navigationBarTitleDisplayMode(.inline)
     }
     
+    private var sensorTypeDescription: String {
+        switch settings.selectedSensorType {
+        case .witmotion:
+            return "Accendi il sensore WitMotion e avvia la scansione"
+        case .arduino:
+            return "Accendi il sensore Arduino VBT e avvia la scansione"
+        }
+    }
+
     private func connectToDevice(_ device: CBPeripheral) {
-        bleManager.connect(to: device)
-        
+        switch settings.selectedSensorType {
+        case .witmotion:
+            sensorManager.bleManager.connect(to: device)
+        case .arduino:
+            sensorManager.arduinoManager.connect(to: device)
+        }
+
         // Save last connected device
         settings.lastConnectedSensorMAC = device.address
         settings.lastConnectedSensorName = device.name
-        
+
         // Dismiss after short delay to show connection feedback
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
             dismiss()
@@ -125,12 +159,13 @@ struct SensorScanView: View {
 struct DeviceRow: View {
     let device: CBPeripheral
     let isLastConnected: Bool
+    let sensorType: SensorType
     let onConnect: () -> Void
-    
+
     var body: some View {
         Button(action: onConnect) {
             HStack(spacing: 12) {
-                Image(systemName: "sensor.fill")
+                Image(systemName: sensorType.icon)
                     .font(.title2)
                     .foregroundStyle(.blue)
                     .frame(width: 40)
@@ -182,6 +217,6 @@ extension CBPeripheral {
 
 #Preview {
     NavigationStack {
-        SensorScanView(bleManager: BLEManager())
+        SensorScanView(sensorManager: UnifiedSensorManager())
     }
 }
