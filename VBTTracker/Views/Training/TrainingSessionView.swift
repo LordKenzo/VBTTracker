@@ -22,8 +22,7 @@ struct TrainingSessionView: View {
 
     @State private var dataStreamTimer: Timer?
     @State private var showEndSessionAlert = false
-    @State private var showSaveSessionAlert = false
-
+    @State private var showRepReview = false  // ✅ Nuova: mostra revisione reps
     @State private var showSummary = false
     @State private var sessionData: TrainingSessionData?
 
@@ -177,28 +176,37 @@ struct TrainingSessionView: View {
         }
         .alert("Terminare Sessione?", isPresented: $showEndSessionAlert) {
             Button("Termina", role: .destructive) {
-                // ✅ Usa direttamente il factory method del modello
+                // ✅ Crea sessionData e mostra revisione reps
                 sessionData = TrainingSessionData.from(
                     manager: sessionManager,
                     targetZone: targetZone,
                     velocityLossThreshold: SettingsManager.shared.velocityLossThreshold
                 )
                 sessionManager.stopRecording()
-                showSaveSessionAlert = true
+                showRepReview = true  // ✅ Mostra revisione invece dell'alert
             }
         } message: {
             Text("Ripetizioni completate: \(sessionManager.repCount)/\(targetReps)")
         }
-        .alert("Salvare Sessione?", isPresented: $showSaveSessionAlert) {
-            Button("Non Salvare", role: .cancel) {
-                showSummary = true
+        .fullScreenCover(isPresented: $showRepReview) {
+            if let data = sessionData {
+                // ✅ Binding mutabile per permettere modifiche
+                RepReviewView(
+                    sessionData: Binding(
+                        get: { data },
+                        set: { sessionData = $0 }
+                    ),
+                    targetReps: targetReps,
+                    onSave: {
+                        saveSession()
+                        showSummary = true
+                    },
+                    onDiscard: {
+                        // Non salvare, ma mostra comunque il summary
+                        showSummary = true
+                    }
+                )
             }
-            Button("Salva") {
-                saveSession()
-                showSummary = true
-            }
-        } message: {
-            Text("Vuoi salvare questa sessione nello storico degli allenamenti?")
         }
         .sheet(isPresented: $showSummary) {
             if let data = sessionData {
