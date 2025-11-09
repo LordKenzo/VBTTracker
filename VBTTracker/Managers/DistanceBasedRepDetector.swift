@@ -309,9 +309,27 @@ final class DistanceBasedRepDetector: ObservableObject {
                 concentricPeakDistance = smoothedDist
             }
 
-            // Rileva fine concentrica quando Arduino rileva idle (fermo al top)
-            if arduinoState == .idle, concentricSamples.count >= lookAheadSamples {
-                tryCompleteRep(currentSample: currentSample)
+            // Rileva fine concentrica quando:
+            // 1. Arduino rileva idle (fermo al top - rep con pausa) OPPURE
+            // 2. Arduino inizia nuova eccentrica (touch-and-go senza pausa)
+            if concentricSamples.count >= lookAheadSamples {
+                if arduinoState == .idle {
+                    // Rep con pausa al top
+                    print("✅ Rep completata con pausa al top")
+                    tryCompleteRep(currentSample: currentSample)
+                    // resetCycle() verrà chiamato e tornerà a .waitingDescent
+                } else if arduinoState == .receding {
+                    // Touch-and-go: completa rep corrente e inizia immediatamente nuova eccentrica
+                    print("🔄 Touch-and-go: completamento rep e inizio nuova eccentrica")
+                    tryCompleteRep(currentSample: currentSample)
+                    // tryCompleteRep ha chiamato resetCycle() → state = .waitingDescent
+                    // Forza l'inizio della nuova eccentrica immediatamente
+                    state = .descending
+                    eccentricStartTime = currentSample.timestamp
+                    eccentricStartDistance = smoothedDist
+                    onPhaseChange?(.descending)
+                    print("⬇️ Nuova eccentrica iniziata (touch-and-go) a \(String(format: "%.1f", smoothedDist)) mm")
+                }
             }
         }
     }
