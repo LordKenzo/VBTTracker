@@ -542,7 +542,7 @@ struct TrainingSessionView: View {
                     .fontWeight(.semibold)
                     .foregroundStyle(.secondary)
 
-                if let pattern = sessionManager.repDetector.learnedPattern {
+                if sessionManager.repDetector.learnedPattern != nil {
                     Text("Parametri adattati automaticamente")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
