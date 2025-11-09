@@ -126,6 +126,23 @@ struct MovementProfile: Codable, Hashable {
         try container.encode(typicalDuration.lowerBound, forKey: .typicalDurationMin)
         try container.encode(typicalDuration.upperBound, forKey: .typicalDurationMax)
     }
+
+    // Hashable conformance (ClosedRange is not Hashable)
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(minConcentricDuration)
+        hasher.combine(minAmplitude)
+        hasher.combine(eccentricThreshold)
+        hasher.combine(typicalDuration.lowerBound)
+        hasher.combine(typicalDuration.upperBound)
+    }
+
+    static func == (lhs: MovementProfile, rhs: MovementProfile) -> Bool {
+        lhs.minConcentricDuration == rhs.minConcentricDuration &&
+        lhs.minAmplitude == rhs.minAmplitude &&
+        lhs.eccentricThreshold == rhs.eccentricThreshold &&
+        lhs.typicalDuration.lowerBound == rhs.typicalDuration.lowerBound &&
+        lhs.typicalDuration.upperBound == rhs.typicalDuration.upperBound
+    }
 }
 
 // MARK: - Predefined Exercises
