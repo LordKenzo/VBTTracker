@@ -11,6 +11,7 @@ struct PatternSequence: Identifiable, Codable {
     let id: UUID
     let date: Date
     let label: String              // es. "Squat 60kg"
+    let exerciseId: UUID           // ✅ Collegamento all'esercizio
     let repCount: Int
     let loadPercentage: Double?    // % carico rispetto al massimale (es. 70.0)
     let avgDuration: Double
@@ -64,19 +65,40 @@ final class LearnedPatternLibrary: ObservableObject {
         return patterns.min(by: { distance($0.featureVector, features) < distance($1.featureVector, features) })
     }
     
-    /// Match intelligente considerando sia feature vector che % carico
-    /// Se fornisci loadPercentage, i pattern con carico simile avranno priorità
-    func matchPatternWeighted(for sequence: [AccelerationSample], loadPercentage: Double? = nil) -> PatternSequence? {
+    /// Match intelligente considerando feature vector, % carico e esercizio corrente
+    /// Se fornisci loadPercentage e/o exerciseId, i pattern corrispondenti avranno priorità
+    func matchPatternWeighted(
+        for sequence: [AccelerationSample],
+        loadPercentage: Double? = nil,
+        exerciseId: UUID? = nil
+    ) -> PatternSequence? {
         guard !patterns.isEmpty else { return nil }
         let features = featureVector(for: sequence)
-        
-        // Se non abbiamo info sul carico, usa matching standard
-        guard let targetLoad = loadPercentage else {
-            return matchPattern(for: sequence)
+
+        // ✅ Filtra per esercizio se specificato (hard filter)
+        let relevantPatterns: [PatternSequence]
+        if let exerciseId = exerciseId {
+            relevantPatterns = patterns.filter { $0.exerciseId == exerciseId }
+            // Se nessun pattern per questo esercizio, fallback a tutti i pattern
+            if relevantPatterns.isEmpty {
+                print("⚠️  Nessun pattern per questo esercizio, usando tutti i pattern")
+                relevantPatterns = patterns
+            } else {
+                print("🎯 Filtrati \(relevantPatterns.count) pattern per esercizio corrente")
+            }
+        } else {
+            relevantPatterns = patterns
         }
-        
+
+        // Se non abbiamo info sul carico, usa matching standard sui pattern filtrati
+        guard let targetLoad = loadPercentage else {
+            return relevantPatterns.min(by: {
+                distance($0.featureVector, features) < distance($1.featureVector, features)
+            })
+        }
+
         // Calcola score pesato: 70% similarità pattern + 30% vicinanza carico
-        let scored = patterns.map { pattern -> (pattern: PatternSequence, score: Double) in
+        let scored = relevantPatterns.map { pattern -> (pattern: PatternSequence, score: Double) in
             let featureDist = distance(pattern.featureVector, features)
             
             // Calcola distanza carico (normalizzata 0-1)

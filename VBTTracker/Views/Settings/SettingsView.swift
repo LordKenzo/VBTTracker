@@ -108,30 +108,28 @@ struct SettingsView: View {
                         )
                     }
 
-                    // ✅ Pattern Appresi - SOLO WitMotion
-                    NavigationLink(destination: LearnedPatternsView()) {
-                        NavigationSettingRow(
-                            title: "Pattern Appresi",
-                            subtitle: patternSubtitle,
-                            icon: "brain.head.profile",
-                            iconColor: .purple
-                        )
-                    }
-                    .disabled(settings.selectedSensorType != .witmotion)
-                    .opacity(settings.selectedSensorType != .witmotion ? 0.5 : 1.0)
+                    // ✅ Pattern Appresi - SOLO WitMotion (nascosto completamente per Arduino)
+                    if settings.selectedSensorType == .witmotion {
+                        NavigationLink(destination: LearnedPatternsView()) {
+                            NavigationSettingRow(
+                                title: "Pattern Appresi",
+                                subtitle: patternSubtitle,
+                                icon: "brain.head.profile",
+                                iconColor: .purple
+                            )
+                        }
 
-                    // ✅ Registra Pattern - SOLO WitMotion
-                    NavigationLink(destination: RecordPatternView(sensorManager: sensorManager)) {
-                        NavigationSettingRow(
-                            title: "Registra Pattern",
-                            subtitle: "Registra manualmente un nuovo pattern",
-                            icon: "waveform.badge.plus",
-                            iconColor: .red,
-                            badge: "Nuovo"
-                        )
+                        // ✅ Registra Pattern - SOLO WitMotion
+                        NavigationLink(destination: RecordPatternView(sensorManager: sensorManager)) {
+                            NavigationSettingRow(
+                                title: "Registra Pattern",
+                                subtitle: "Registra manualmente un nuovo pattern",
+                                icon: "waveform.badge.plus",
+                                iconColor: .red,
+                                badge: "Nuovo"
+                            )
+                        }
                     }
-                    .disabled(settings.selectedSensorType != .witmotion)
-                    .opacity(settings.selectedSensorType != .witmotion ? 0.5 : 1.0)
 
                     NavigationLink(destination: VelocitySettingsView()) {
                         NavigationSettingRow(

@@ -113,14 +113,28 @@ struct PatternCard: View {
             HStack {
                 Text(pattern.label)
                     .font(.headline)
-                
+
                 Spacer()
-                
+
                 if let load = pattern.loadPercentage {
                     LoadBadge(percentage: load)
                 }
             }
-            
+
+            // ✅ Exercise Badge
+            HStack(spacing: 6) {
+                Image(systemName: exerciseIcon)
+                    .font(.caption)
+                    .foregroundStyle(exerciseColor)
+                Text(exerciseName)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(exerciseColor.opacity(0.1))
+            .clipShape(Capsule())
+
             // Stats Grid
             LazyVGrid(columns: [
                 GridItem(.flexible()),
@@ -131,7 +145,7 @@ struct PatternCard: View {
                 StatRow(icon: "bolt.fill", label: "PPV", value: String(format: "%.2f m/s", pattern.avgPPV))
                 StatRow(icon: "timer", label: "Durata", value: String(format: "%.1f s", pattern.avgDuration))
             }
-            
+
             // Date
             HStack {
                 Image(systemName: "calendar")
@@ -143,6 +157,19 @@ struct PatternCard: View {
             }
         }
         .padding(.vertical, 8)
+    }
+
+    // ✅ Helper per trovare esercizio dal pattern
+    private var exerciseName: String {
+        Exercise.all.first(where: { $0.id == pattern.exerciseId })?.name ?? "Esercizio Sconosciuto"
+    }
+
+    private var exerciseIcon: String {
+        Exercise.all.first(where: { $0.id == pattern.exerciseId })?.icon ?? "questionmark.circle"
+    }
+
+    private var exerciseColor: Color {
+        Exercise.all.first(where: { $0.id == pattern.exerciseId })?.category.color ?? .gray
     }
 }
 

@@ -69,8 +69,14 @@ struct TrainingSessionView: View {
                     if settings.stopOnVelocityLoss && sessionManager.repCount > 1 {
                         velocityLossCard
                     }
-                    
-                    // 6. PULSANTI
+
+                    // 6. PATTERN ATTIVO (solo WitMotion)
+                    if settings.selectedSensorType == .witmotion && sessionManager.isRecording,
+                       sessionManager.repDetector.learnedPattern != nil {
+                        activePatternCard
+                    }
+
+                    // 7. PULSANTI
                     controlButtons
                         .padding(.top, 8)
                 }
@@ -521,7 +527,50 @@ struct TrainingSessionView: View {
             }
         }
     }
-    
+
+    // MARK: - 7. Active Pattern Badge (WitMotion only)
+
+    private var activePatternCard: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "brain.head.profile.fill")
+                .font(.title3)
+                .foregroundStyle(.purple)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Pattern Riconosciuto")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.secondary)
+
+                if let pattern = sessionManager.repDetector.learnedPattern {
+                    Text("Parametri adattati automaticamente")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("Nessun pattern attivo")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Spacer()
+
+            Image(systemName: "checkmark.circle.fill")
+                .font(.title3)
+                .foregroundStyle(.green)
+        }
+        .padding()
+        .background(
+            LinearGradient(
+                colors: [Color.purple.opacity(0.1), Color.purple.opacity(0.05)],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+        )
+        .cornerRadius(12)
+        .shadow(radius: 2)
+    }
+
     // MARK: - Helpers
     
     private var velocityLossColor: Color {
