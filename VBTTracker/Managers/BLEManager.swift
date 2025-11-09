@@ -2,7 +2,7 @@
 //  BLEManager.swift
 //  VBTTracker
 //
-//  Gestione BLE per WitMotion WT901BLE
+//  Gestione BLE per WitMotion (WT901BLE e WT9011DCL)
 //
 
 import Foundation
@@ -36,9 +36,19 @@ final class BLEManager: NSObject, ObservableObject, SensorDataProvider {
     private var writeCharacteristic: CBCharacteristic?     // comandi (write / writeWithoutResponse)
     private var seenPeripherals: [UUID: CBPeripheral] = [:]
 
-    // UUID del sensore WitMotion
-    static let serviceUUID = CBUUID(string: "0000FFE5-0000-1000-8000-00805F9A34FB")
-    static let characteristicUUID = CBUUID(string: "0000FFE4-0000-1000-8000-00805F9A34FB")
+    // UUID del sensore WitMotion - Supporta due modelli diversi
+    // Modello 1 (WT901BLE): Service FFE5, Char FFE4 (notify+write combinato)
+    static let serviceUUID_FFE5 = CBUUID(string: "0000FFE5-0000-1000-8000-00805F9A34FB")
+    static let characteristicUUID_FFE4 = CBUUID(string: "0000FFE4-0000-1000-8000-00805F9A34FB")
+
+    // Modello 2 (WT9011DCL): Service FFF0, Char FFF1 (notify), FFF2 (write)
+    static let serviceUUID_FFF0 = CBUUID(string: "0000FFF0-0000-1000-8000-00805F9A34FB")
+    static let dataUUID_FFF1 = CBUUID(string: "0000FFF1-0000-1000-8000-00805F9A34FB")
+    static let controlUUID_FFF2 = CBUUID(string: "0000FFF2-0000-1000-8000-00805F9A34FB")
+
+    // Compatibilità: UUID legacy
+    static let serviceUUID = serviceUUID_FFE5
+    static let characteristicUUID = characteristicUUID_FFE4
 
     // Sample rate estimation
     private var lastPacketTime: Date?
@@ -163,8 +173,9 @@ final class BLEManager: NSObject, ObservableObject, SensorDataProvider {
         statusMessage = "Scansione in corso 🔍"
         print("Inizio scansione dispositivi WitMotion")
 
+        // ✅ Scansiona per entrambi i modelli di sensore WitMotion
         central.scanForPeripherals(
-            withServices: [Self.serviceUUID],
+            withServices: [Self.serviceUUID_FFE5, Self.serviceUUID_FFF0],
             options: [CBCentralManagerScanOptionAllowDuplicatesKey: false]
         )
 
@@ -362,8 +373,9 @@ extension BLEManager: CBCentralManagerDelegate {
         }
         
         peripheral.delegate = self
-        peripheral.discoverServices([Self.serviceUUID])
-        
+        // Cerca entrambi i modelli di service
+        peripheral.discoverServices([Self.serviceUUID_FFE5, Self.serviceUUID_FFF0])
+
         // 🆕 AUTO-CONFIGURA a 200Hz dopo 1 secondo (tempo per discovery)
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
             self?.configureFor200Hz()
@@ -427,26 +439,49 @@ extension BLEManager: CBPeripheralDelegate {
             return
         }
         service.characteristics?.forEach { ch in
-            print("🟢 Caratteristica: \(ch.uuid)  props=\(ch.properties)")
+            print("🟢 Caratteristica: \(ch.uuid)  props=\(ch.properties.rawValue)")
 
-            // Stream dati (notify) → tipicamente FFE4
-            if ch.uuid == Self.characteristicUUID || ch.properties.contains(.notify) {
+            // ✅ Modello WT9011DCL: FFF1 (notify) + FFF2 (write) separati
+            if ch.uuid == Self.dataUUID_FFF1 {
                 notifyCharacteristic = ch
                 dataCharacteristic = ch
-                print("✅ Attivo notifiche dati su \(ch.uuid)")
+                print("✅ [WT9011DCL] Dati su FFF1 (notify)")
                 peripheral.setNotifyValue(true, for: ch)
             }
 
-            // Comandi (write) → qualsiasi char con write* (spesso FFE9)
-            if ch.properties.contains(.write) || ch.properties.contains(.writeWithoutResponse) ||
-               ch.uuid == CBUUID(string: "0000FFE9-0000-1000-8000-00805F9A34FB") {
+            if ch.uuid == Self.controlUUID_FFF2 {
                 writeCharacteristic = ch
-                print("✍️  Useremo \(ch.uuid) per i comandi (write)")
+                print("✍️  [WT9011DCL] Comandi su FFF2 (write)")
+            }
+
+            // ✅ Modello WT901BLE: FFE4 (notify+write combinato)
+            if ch.uuid == Self.characteristicUUID_FFE4 {
+                notifyCharacteristic = ch
+                dataCharacteristic = ch
+                print("✅ [WT901BLE] Dati su FFE4 (notify)")
+                peripheral.setNotifyValue(true, for: ch)
+
+                // FFE4 serve anche per write se non c'è caratteristica dedicata
+                if writeCharacteristic == nil {
+                    writeCharacteristic = ch
+                    print("✍️  [WT901BLE] Comandi su FFE4 (stesso char)")
+                }
+            }
+
+            // Fallback generico: char con write
+            if writeCharacteristic == nil,
+               (ch.properties.contains(.write) || ch.properties.contains(.writeWithoutResponse)) {
+                writeCharacteristic = ch
+                print("✍️  [Generico] Comandi su \(ch.uuid)")
             }
         }
 
         if writeCharacteristic == nil {
             print("⚠️ Nessuna caratteristica di WRITE disponibile (non posso configurare il rate)")
+        } else {
+            print("📋 Configurazione rilevata:")
+            print("   • Notify char: \(notifyCharacteristic?.uuid.uuidString ?? "N/A")")
+            print("   • Write char: \(writeCharacteristic?.uuid.uuidString ?? "N/A")")
         }
     }
     
@@ -599,7 +634,8 @@ extension BLEManager: CBPeripheralDelegate {
             print("⚠️ Errore lettura valore: \(error)")
             return
         }
-        guard characteristic.uuid == Self.characteristicUUID,
+        // ✅ Supporto dual-model: accetta dati da FFF1 (WT9011DCL) o FFE4 (WT901BLE)
+        guard characteristic == notifyCharacteristic,
               let data = characteristic.value else { return }
 
         let bytes = [UInt8](data)
