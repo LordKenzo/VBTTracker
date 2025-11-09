@@ -26,10 +26,11 @@ struct SettingsView: View {
     @ObservedObject var sensorManager: UnifiedSensorManager
     @ObservedObject var calibrationManager: CalibrationManager
     @ObservedObject var settings = SettingsManager.shared
-    
+
     // ✅ CORREZIONE: @ObservedObject per aggiornamento real-time
     @ObservedObject private var patternLibrary = LearnedPatternLibrary.shared
-    
+    @ObservedObject private var exerciseManager = ExerciseManager.shared
+
     @Environment(\.dismiss) var dismiss
     @State private var showResetAlert = false
     
@@ -88,9 +89,9 @@ struct SettingsView: View {
                     NavigationLink(destination: ExerciseSelectionView()) {
                         NavigationSettingRow(
                             title: "Esercizio",
-                            subtitle: ExerciseManager.shared.selectedExercise.name,
-                            icon: ExerciseManager.shared.selectedExercise.icon,
-                            iconColor: ExerciseManager.shared.selectedExercise.category.color,
+                            subtitle: exerciseManager.selectedExercise.name,
+                            icon: exerciseManager.selectedExercise.icon,
+                            iconColor: exerciseManager.selectedExercise.category.color,
                             badge: "★"
                         )
                     }

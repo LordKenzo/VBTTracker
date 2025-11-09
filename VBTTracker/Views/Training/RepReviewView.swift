@@ -138,7 +138,7 @@ struct RepReviewView: View {
                 }
             } footer: {
                 if sessionData.totalReps > 0 {
-                    Text("Elimina le ripetizioni errate o di riscaldamento scorren do da destra a sinistra.")
+                    Text("Elimina le ripetizioni errate o di riscaldamento scorrendo da destra a sinistra.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

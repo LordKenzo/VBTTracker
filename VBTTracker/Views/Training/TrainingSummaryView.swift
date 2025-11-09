@@ -519,22 +519,19 @@ struct TrainingSessionData {
 
     /// Rimuove ripetizioni agli indici specificati e ricalcola velocity loss
     mutating func removeReps(at offsets: IndexSet) {
-        // Salva la prima rep (per ricalcolare VL)
-        let firstRepMPV = reps.first?.meanVelocity
-
         // Rimuovi le reps
         reps.remove(atOffsets: offsets)
 
         // Ricalcola velocity loss from first per tutte le reps rimanenti
-        guard let firstMPV = firstRepMPV ?? reps.first?.meanVelocity,
-              firstMPV > 0,
-              !reps.isEmpty else { return }
+        // usando la nuova prima rep come baseline
+        guard let firstMPV = reps.first?.meanVelocity,
+              firstMPV > 0 else { return }
 
         // Aggiorna velocityLossFromFirst per ogni rep rimanente
-        for i in 0..<reps.count {
-            let vlFromFirst = ((firstMPV - reps[i].meanVelocity) / firstMPV) * 100
-            let oldRep = reps[i]
-            reps[i] = RepData(
+        for index in reps.indices {
+            let vlFromFirst = ((firstMPV - reps[index].meanVelocity) / firstMPV) * 100
+            let oldRep = reps[index]
+            reps[index] = RepData(
                 id: oldRep.id,  // Mantieni lo stesso ID
                 meanVelocity: oldRep.meanVelocity,
                 peakVelocity: oldRep.peakVelocity,
