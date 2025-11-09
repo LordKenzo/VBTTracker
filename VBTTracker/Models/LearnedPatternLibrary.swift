@@ -76,18 +76,15 @@ final class LearnedPatternLibrary: ObservableObject {
         let features = featureVector(for: sequence)
 
         // ✅ Filtra per esercizio se specificato (hard filter)
-        let relevantPatterns: [PatternSequence]
+        var relevantPatterns = patterns
         if let exerciseId = exerciseId {
-            relevantPatterns = patterns.filter { $0.exerciseId == exerciseId }
-            // Se nessun pattern per questo esercizio, fallback a tutti i pattern
-            if relevantPatterns.isEmpty {
+            let filtered = patterns.filter { $0.exerciseId == exerciseId }
+            if filtered.isEmpty {
                 print("⚠️  Nessun pattern per questo esercizio, usando tutti i pattern")
-                relevantPatterns = patterns
             } else {
+                relevantPatterns = filtered
                 print("🎯 Filtrati \(relevantPatterns.count) pattern per esercizio corrente")
             }
-        } else {
-            relevantPatterns = patterns
         }
 
         // Se non abbiamo info sul carico, usa matching standard sui pattern filtrati
