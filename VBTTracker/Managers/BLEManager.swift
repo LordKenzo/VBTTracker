@@ -60,6 +60,16 @@ final class BLEManager: NSObject, ObservableObject, SensorDataProvider {
     private var isConnecting = false
     private var autoReconnectInProgress = false
 
+    // Packet type counters (diagnostica)
+    private var packetCount_51: Int = 0  // Acceleration
+    private var packetCount_52: Int = 0  // Angular velocity
+    private var packetCount_53: Int = 0  // Angle
+    private var packetCount_61: Int = 0  // Combined
+    private var packetCount_71: Int = 0  // Register read response
+    private var packetCount_other: Int = 0
+    private var lastPacketStatsLog: Date = .distantPast
+    private var totalPacketCount: Int = 0
+
     // MARK: - Init
     override init() {
         super.init()
@@ -212,6 +222,16 @@ final class BLEManager: NSObject, ObservableObject, SensorDataProvider {
         packetTimestamps.removeAll()
         lastPublishedSR = nil
         srStableCounter = 0
+
+        // Reset packet counters
+        packetCount_51 = 0
+        packetCount_52 = 0
+        packetCount_53 = 0
+        packetCount_61 = 0
+        packetCount_71 = 0
+        packetCount_other = 0
+        totalPacketCount = 0
+        lastPacketStatsLog = .distantPast
     }
 
     private var lastSRNotifyTime: Date = .distantPast
@@ -376,10 +396,11 @@ extension BLEManager: CBCentralManagerDelegate {
         // Cerca entrambi i modelli di service
         peripheral.discoverServices([Self.serviceUUID_FFE5, Self.serviceUUID_FFF0])
 
-        // 🆕 AUTO-CONFIGURA a 200Hz dopo 1 secondo (tempo per discovery)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-            self?.configureFor200Hz()
-        }
+        // ⚠️ AUTO-CONFIGURAZIONE DISABILITATA - sensore non supporta comandi di config via BLE
+        // La configurazione deve essere fatta via USB con WitMotion software
+        // DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+        //     self?.configureFor200Hz()
+        // }
     }
 
     func centralManager(_ central: CBCentralManager,
@@ -677,16 +698,46 @@ extension BLEManager: CBPeripheralDelegate {
               let data = characteristic.value else { return }
 
         let bytes = [UInt8](data)
-        if bytes.count >= 6, bytes[0] == 0x55, bytes[1] == 0x71 {
-            // Single-return packet: 55 71 <startReg> 00 <v0L> <v0H> <v1L> <v1H> ...
+        guard bytes.count >= 2, bytes[0] == 0x55 else { return }
+
+        // 📊 Conta TUTTI i tipi di pacchetto per diagnostica
+        totalPacketCount += 1
+        let packetType = bytes[1]
+
+        switch packetType {
+        case 0x51: packetCount_51 += 1  // Acceleration only
+        case 0x52: packetCount_52 += 1  // Angular velocity only
+        case 0x53: packetCount_53 += 1  // Angle only
+        case 0x61: packetCount_61 += 1  // Combined (quello che usiamo)
+        case 0x71: packetCount_71 += 1  // Register read response
+        default:   packetCount_other += 1
+        }
+
+        // Log statistiche ogni 2 secondi
+        let now = Date()
+        if now.timeIntervalSince(lastPacketStatsLog) >= 2.0 {
+            let totalRate = Double(totalPacketCount) / max(0.1, now.timeIntervalSince(lastPacketStatsLog))
+            print("📊 Packet Stats (last 2s): Total=\(totalPacketCount) (\(String(format: "%.1f", totalRate))Hz) | 0x51=\(packetCount_51) 0x52=\(packetCount_52) 0x53=\(packetCount_53) 0x61=\(packetCount_61) 0x71=\(packetCount_71) other=\(packetCount_other)")
+
+            // Reset counters
+            totalPacketCount = 0
+            packetCount_51 = 0
+            packetCount_52 = 0
+            packetCount_53 = 0
+            packetCount_61 = 0
+            packetCount_71 = 0
+            packetCount_other = 0
+            lastPacketStatsLog = now
+        }
+
+        // Handle register read responses (0x71)
+        if packetType == 0x71, bytes.count >= 6 {
             let start = bytes[2]
             let v0L = bytes[4], _ = bytes[5]
-            // let value = Int(v0H) << 8 | Int(v0L)
 
             switch start {
             case 0x03:
-                // RATE letto
-                let code = v0L // spesso basta il low-byte
+                let code = v0L
                 print("🔎 RATE register: 0x\(String(format: "%02X", code)) " + mapRate(code: code))
 
             case 0x1F:
@@ -696,12 +747,14 @@ extension BLEManager: CBPeripheralDelegate {
             default:
                 break
             }
-            return // non è un pacchetto 0x61, quindi esco qui
+            return
         }
 
-        // Pacchetto dati standard (0x55 0x61) → parsing normale
-        DispatchQueue.main.async {
-            self.parseWitMotionPacket(data)
+        // Parse pacchetto dati combinato (0x61) per l'app
+        if packetType == 0x61 {
+            DispatchQueue.main.async {
+                self.parseWitMotionPacket(data)
+            }
         }
     }
     
