@@ -486,11 +486,21 @@ extension BLEManager: CBPeripheralDelegate {
     }
     
     // MARK: - Write helper
-    private func writeBytes(_ bytes: [UInt8]) {
+    private func writeBytes(_ bytes: [UInt8], forceResponse: Bool = false) {
         guard let p = connectedPeripheral, let ch = writeCharacteristic else {
             print("⚠️ Nessuna caratteristica di WRITE disponibile"); return
         }
-        let type: CBCharacteristicWriteType = ch.properties.contains(.writeWithoutResponse) ? .withoutResponse : .withResponse
+        // Per comandi di configurazione usa sempre .withResponse se possibile (più affidabile)
+        let type: CBCharacteristicWriteType
+        if forceResponse && ch.properties.contains(.write) {
+            type = .withResponse
+        } else if ch.properties.contains(.writeWithoutResponse) {
+            type = .withoutResponse
+        } else {
+            type = .withResponse
+        }
+
+        print("📤 Write [\(bytes.map { String(format: "%02X", $0) }.joined(separator: " "))] → \(ch.uuid) (type: \(type == .withResponse ? "withResponse" : "withoutResponse"))")
         p.writeValue(Data(bytes), for: ch, type: type)
     }
     
@@ -504,17 +514,17 @@ extension BLEManager: CBPeripheralDelegate {
     private func readBandwidth() { readRegister(0x1F) } // BANDWIDTH
 
     // MARK: - Comandi WitMotion (FF AA …)
-    private func unlock() { writeBytes([0xFF, 0xAA, 0x69, 0x88, 0xB5]) }     // sblocco config
-    private func saveConfig() { writeBytes([0xFF, 0xAA, 0x00, 0x00, 0x00]) }  // salva
+    private func unlock() { writeBytes([0xFF, 0xAA, 0x69, 0x88, 0xB5], forceResponse: true) }     // sblocco config
+    private func saveConfig() { writeBytes([0xFF, 0xAA, 0x00, 0x00, 0x00], forceResponse: true) }  // salva
 
     /// Bandwidth @0x1F: 0x00=256Hz, 0x01=188Hz, 0x02=98Hz, 0x03=42Hz, 0x04=20Hz, 0x05=10Hz, 0x06=5Hz
     private func setBandwidth(_ code: UInt8) {
-        writeBytes([0xFF, 0xAA, 0x1F, code, 0x00])
+        writeBytes([0xFF, 0xAA, 0x1F, code, 0x00], forceResponse: true)
     }
 
     /// Return Rate variante "codice" (più comune su WT901BLE): 0x0B = 200Hz, 0x09 = 100Hz, 0x06 = 10Hz…
     private func setReturnRateCode(_ code: UInt8) {
-        writeBytes([0xFF, 0xAA, 0x03, code, 0x00])
+        writeBytes([0xFF, 0xAA, 0x03, code, 0x00], forceResponse: true)
     }
 
     /// Return Rate variante "valore assoluto" (alcuni firmware accettano 200=0xC8)
@@ -522,52 +532,67 @@ extension BLEManager: CBPeripheralDelegate {
         let lo = UInt8(value & 0xFF), hi = UInt8((value >> 8) & 0xFF)
         // se il tuo firmware usasse realmente questa forma, spesso il comando è 0x03 poi lo/hi o hi/lo.
         // Qui invio lo/hi come molti esempi; se non cambia nulla restiamo al metodo "code".
-        writeBytes([0xFF, 0xAA, 0x03, lo, hi])
+        writeBytes([0xFF, 0xAA, 0x03, lo, hi], forceResponse: true)
     }
     
     /// Imposta BW alta e Return Rate 200 Hz, poi salva.
     /// Prova prima la forma "code" (0x0B = 200Hz). In fallback usa la forma "valore" (200 = 0x00C8).
     func configureFor200Hz() {
-        guard writeCharacteristic != nil else {
-            print("⚠️ Impossibile configurare: nessuna caratteristica di WRITE")
+        guard let p = connectedPeripheral,
+              let notifyCh = notifyCharacteristic,
+              writeCharacteristic != nil else {
+            print("⚠️ Impossibile configurare: caratteristiche mancanti")
             return
         }
-        
+
         print("⚙️ Inizio configurazione 200 Hz...")
-        
-        // Step 1: Unlock (50ms)
-        unlock()
-        
-        // Step 2: Set Bandwidth 256Hz (100ms)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+        print("   • Stop notifiche durante configurazione...")
+
+        // Step 0: Stop notifiche per evitare conflitti durante configurazione
+        p.setNotifyValue(false, for: notifyCh)
+
+        // Step 1: Unlock (200ms delay)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            self.unlock()
+            print("   • Unlock inviato")
+        }
+
+        // Step 2: Set Bandwidth 256Hz (400ms)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
             self.setBandwidth(0x00) // 256 Hz
             print("   • Bandwidth → 256Hz")
         }
-        
-        // Step 3: Set Return Rate 200Hz (150ms)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.10) {
+
+        // Step 3: Set Return Rate 200Hz (600ms)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
             self.setReturnRateCode(0x0B) // 200 Hz
             print("   • Return Rate → 200Hz (code 0x0B)")
         }
-        
-        // Step 4: Save config (200ms)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+
+        // Step 4: Save config (800ms)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
             self.saveConfig()
             print("   • Config salvata")
         }
-        
-        // Step 5: Verifica dopo 500ms
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.50) {
+
+        // Step 5: Riabilita notifiche (1000ms)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            p.setNotifyValue(true, for: notifyCh)
+            print("   • Notifiche riabilitate")
+        }
+
+        // Step 6: Verifica dopo 1200ms
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
             self.readBandwidth()
             self.readRate()
             print("   • Verifica configurazione...")
         }
-        
-        // Step 6: Check sample rate dopo 1.5s
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+
+        // Step 7: Check sample rate dopo 2.5s
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
             let currentSR = self.sampleRateHz ?? 0
             print("   • Sample rate rilevato: \(String(format: "%.1f", currentSR)) Hz")
-            
+
             if currentSR < 80 {
                 print("⚠️ Sample rate basso, retry con 100Hz...")
                 self.retryWith100Hz()
@@ -581,29 +606,42 @@ extension BLEManager: CBPeripheralDelegate {
 
     /// Fallback: prova 100Hz se 200Hz non funziona
     private func retryWith100Hz() {
-        unlock()
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+        guard let p = connectedPeripheral,
+              let notifyCh = notifyCharacteristic else { return }
+
+        print("   • Stop notifiche per retry...")
+        p.setNotifyValue(false, for: notifyCh)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            self.unlock()
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
             self.setBandwidth(0x00) // 256 Hz
         }
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.10) {
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
             self.setReturnRateCode(0x09) // 100 Hz
             print("   • Retry: Return Rate → 100Hz (code 0x09)")
         }
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
             self.saveConfig()
         }
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.50) {
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            p.setNotifyValue(true, for: notifyCh)
+            print("   • Notifiche riabilitate")
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
             self.readRate()
         }
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
             let currentSR = self.sampleRateHz ?? 0
             print("   • Sample rate dopo retry: \(String(format: "%.1f", currentSR)) Hz")
-            
+
             if currentSR >= 50 {
                 print("✅ Configurazione 100Hz accettata")
             } else {
