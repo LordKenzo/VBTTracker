@@ -135,12 +135,13 @@ final class PatternRecorderManager: ObservableObject {
         
         // Crea feature vector
         let features = createFeatureVector(from: samples)
-        
-        // Crea pattern
+
+        // Crea pattern con esercizio corrente
         let pattern = PatternSequence(
             id: UUID(),
             date: Date(),
             label: label,
+            exerciseId: ExerciseManager.shared.selectedExercise.id,
             repCount: repCount,
             loadPercentage: loadPercentage,
             avgDuration: duration / Double(max(repCount, 1)),
