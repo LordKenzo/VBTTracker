@@ -51,6 +51,24 @@
 - Roadmap sviluppo futuro
 - Riflessioni personali
 
+### 7. [Bibliografia](./07-bibliografia.md)
+- Letteratura scientifica VBT (7 studi chiave)
+- Documentazione tecnica hardware/software
+- Algoritmi e computer science
+- Design patterns e architettura
+- Testing e usability
+- Standard e specifiche
+
+### 8. [Appendici Tecniche](./08-appendici.md)
+- Codice Arduino completo
+- JSON Schema examples
+- Protocolli comunicazione (USB Serial, BLE)
+- User study materials (SUS questionnaire)
+- Velocity zones reference tables
+- Hardware schematics
+- Build instructions
+- Glossario tecnico
+
 ---
 
 ## Abstract
