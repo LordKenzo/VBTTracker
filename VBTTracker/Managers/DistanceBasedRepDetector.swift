@@ -19,7 +19,38 @@ final class DistanceBasedRepDetector: ObservableObject {
     // MARK: - Configuration
 
     var sampleRateHz: Double = 50.0
-    var lookAheadSamples: Int = 10
+
+    // ✅ ADAPTIVE PARAMETERS - Si adattano in base alla velocity zone selezionata dall'utente
+
+    /// Look-ahead samples dinamico basato sulla velocity target
+    /// - Movimenti veloci: meno campioni (più reattivo)
+    /// - Movimenti lenti: più campioni (più stabile)
+    var lookAheadSamples: Int {
+        let targetVelocity = SettingsManager.shared.targetMeanVelocity
+
+        switch targetVelocity {
+        case 0..<0.30:   return 10  // Forza Massima: lenti, serve stabilità
+        case 0.30..<0.50: return 7  // Forza: lenti-medi
+        case 0.50..<0.75: return 5  // Forza-Velocità: medi
+        case 0.75..<1.00: return 3  // Velocità: veloci, serve reattività
+        default:          return 2  // Velocità Massima: molto veloci
+        }
+    }
+
+    /// Durata minima concentrica dinamica basata sulla velocity target
+    /// - Movimenti veloci: durata minore (concentrica più rapida)
+    /// - Movimenti lenti: durata maggiore (concentrica più lunga)
+    private var minConcentricDuration: TimeInterval {
+        let targetVelocity = SettingsManager.shared.targetMeanVelocity
+
+        switch targetVelocity {
+        case 0..<0.30:   return 0.5   // Forza Massima: >500ms
+        case 0.30..<0.50: return 0.4  // Forza: >400ms
+        case 0.50..<0.75: return 0.3  // Forza-Velocità: >300ms
+        case 0.75..<1.00: return 0.2  // Velocità: >200ms
+        default:          return 0.15 // Velocità Massima: >150ms
+        }
+    }
 
     // ROM expected (in mm)
     var expectedROM: Double {
@@ -41,9 +72,8 @@ final class DistanceBasedRepDetector: ObservableObject {
         return expectedROM * (1.0 + tolerance) + 10.0  // Aggiungi buffer di 10mm
     }
 
-    // Soglie
+    // Soglie fisse
     private let MIN_VELOCITY_THRESHOLD = 50.0  // mm/s minimo per rilevare movimento
-    private let MIN_CONCENTRIC_DURATION: TimeInterval = 0.3
     private let MIN_TIME_BETWEEN_REPS: TimeInterval = 0.8
 
     // MARK: - Callbacks
@@ -124,7 +154,12 @@ final class DistanceBasedRepDetector: ObservableObject {
             concentricPeakDistance = nil
             baselineDistance = nil
             idleStartTime = nil
+
+            let targetVelocity = SettingsManager.shared.targetMeanVelocity
             print("🔄 DistanceBasedRepDetector reset")
+            print("⚙️ Parametri adattivi (target MPV: \(String(format: "%.2f", targetVelocity)) m/s):")
+            print("   • lookAheadSamples: \(lookAheadSamples) (~\(Int(Double(lookAheadSamples)/sampleRateHz*1000))ms)")
+            print("   • minConcentricDuration: \(String(format: "%.2f", minConcentricDuration))s")
         }
     }
 
@@ -412,8 +447,8 @@ final class DistanceBasedRepDetector: ObservableObject {
         let displacementMM = abs(eccentricStartDist - concentricStart)
 
         // Validazioni
-        guard concentricDuration >= MIN_CONCENTRIC_DURATION else {
-            print("❌ Rep scartata: durata concentrica troppo breve (\(String(format: "%.2f", concentricDuration))s)")
+        guard concentricDuration >= minConcentricDuration else {
+            print("❌ Rep scartata: durata concentrica troppo breve (\(String(format: "%.2f", concentricDuration))s < \(String(format: "%.2f", minConcentricDuration))s min)")
             resetCycle()
             return
         }
