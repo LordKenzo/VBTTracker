@@ -41,6 +41,15 @@
 - Accuratezza rilevamento reps
 - Latency e performance
 - Confronto con sistemi esistenti
+- User study results
+- Cost-benefit analysis
+
+### 6. [Conclusioni e Lavoro Futuro](./06-conclusioni.md)
+- Sintesi risultati
+- Contributi scientifici
+- Limitazioni
+- Roadmap sviluppo futuro
+- Riflessioni personali
 
 ---
 
