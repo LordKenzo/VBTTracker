@@ -10,35 +10,23 @@
 
 import Foundation
 
-final class VBTRepDetector {
+final class VBTRepDetector: RepDetectorProtocol {
 
     // MARK: - Debug / Thresholds
 
     // Metti a false per soglie realistiche
     private let DEBUG_DETECTION = false
 
-    // Spostamento (m) minimo/massimo accettato per la fase concentrica
-    // Panca piana tipicamente ~0.30–0.50 m, lasciamo un po' di margine.
-    // Se ROM personalizzato è attivo, usa quei valori invece dei default
-    private var MIN_CONC_DISPLACEMENT: Double {
-        let settings = SettingsManager.shared
-        if settings.useCustomROM {
-            return settings.customROM * (1.0 - settings.customROMTolerance)
-        }
-        return 0.20
-    }
+    // ROM validation using shared utility
+    private lazy var romValidator: ROMValidator = {
+        ROMValidator.fromSettings(unit: .meters, defaultMin: 0.20, defaultMax: 0.80)
+    }()
 
-    private var MAX_CONC_DISPLACEMENT: Double {
-        let settings = SettingsManager.shared
-        if settings.useCustomROM {
-            return settings.customROM * (1.0 + settings.customROMTolerance)
-        }
-        return 0.80
-    }
+    // Refractory period validation using shared utility
+    private var refractoryValidator = RefractoryValidator(minTimeBetweenReps: 0.80)
 
     // Valori di sicurezza
     private let DEFAULT_MIN_CONCENTRIC: TimeInterval = 0.45
-    private let DEFAULT_REFRACTORY: TimeInterval = 0.80
     private let MAX_MPV = 2.5
     private let MAX_PPV = 3.0
     private let warmupReps = 3
@@ -63,10 +51,16 @@ final class VBTRepDetector {
 
     var learnedPattern: LearnedPattern?
 
-    // Callback
-    enum Phase { case idle, descending, ascending, completed }
-    var onPhaseChange: ((Phase) -> Void)?
+    // MARK: - RepDetectorProtocol Conformance
+
+    // Callbacks (protocol requirements)
+    var onPhaseChange: ((DetectorPhase) -> Void)?
     var onUnrack: (() -> Void)?
+
+    // Last rep time (protocol requirement, delegated to refractoryValidator)
+    var lastRepTime: Date? {
+        refractoryValidator.lastRepTime
+    }
 
     // MARK: - Adaptive params
 
@@ -120,7 +114,6 @@ final class VBTRepDetector {
 
     private var lastPeak: (value: Double, index: Int, time: Date)?
     private var lastValley: (value: Double, index: Int, time: Date)?
-    private var lastRepTime: Date?
 
     private var isFirstMovement = true
     private var isInWarmup = true
@@ -173,7 +166,7 @@ final class VBTRepDetector {
         smoothedValues.removeAll()
         lastPeak = nil
         lastValley = nil
-        lastRepTime = nil
+        refractoryValidator.reset()
         isFirstMovement = true
         isInWarmup = true
         repAmplitudes.removeAll()
@@ -279,7 +272,7 @@ final class VBTRepDetector {
                     let amplitude = peakT.value - valley.value
                     let concDur  = peakT.time.timeIntervalSince(valley.time)
 
-                    let refractoryOK = lastRepTime == nil || now.timeIntervalSince(lastRepTime!) >= minRefractory
+                    let refractoryOK = refractoryValidator.canDetectRep(at: now)
                     let ampOK = amplitude >= minAmplitude
                     let durOK = concDur >= minConcentricDurationSec()
 
@@ -291,9 +284,9 @@ final class VBTRepDetector {
                         mpv = clamped.0
                         ppv = clamped.1
                         if let d = disp {
-                            dispOK = (MIN_CONC_DISPLACEMENT...MAX_CONC_DISPLACEMENT).contains(d)
+                            dispOK = romValidator.isValid(d)
                             if DEBUG_DETECTION {
-                                let rangeInfo = SettingsManager.shared.useCustomROM ? " [Custom ROM: \(String(format: "%.2f", MIN_CONC_DISPLACEMENT))-\(String(format: "%.2f", MAX_CONC_DISPLACEMENT))m]" : ""
+                                let rangeInfo = SettingsManager.shared.useCustomROM ? " [Custom ROM: \(String(format: "%.2f", romValidator.minDisplacement))-\(String(format: "%.2f", romValidator.maxDisplacement))m]" : ""
                                 print("📏 disp=\(String(format: "%.2f", d)) m  gate=\(dispOK ? "OK" : "KO")\(rangeInfo)")
                             }
                         } else {
@@ -320,7 +313,7 @@ final class VBTRepDetector {
                     } else if ampOK && refractoryOK && durOK && (!useDisplacementGate || dispOK) {
                         repDetected  = true
                         duration     = concDur
-                        lastRepTime  = now
+                        refractoryValidator.recordRep(at: now)
 
                         // warmup learning
                         repAmplitudes.append(amplitude)
@@ -356,7 +349,7 @@ final class VBTRepDetector {
 
     private func maybeAnnounceUnrack(current: Double) {
         guard !hasAnnouncedUnrack,
-              lastRepTime == nil,
+              refractoryValidator.lastRepTime == nil,
               abs(current) > idleThreshold * 2 else { return }
         if let until = unrackCooldownUntil, Date() < until { return }
         onUnrack?()
@@ -638,7 +631,7 @@ extension VBTRepDetector {
         print("   • Displacement Gate: \(useDisplacementGate ? "ON" : "OFF")")
         if useDisplacementGate {
             let romStatus = settings.useCustomROM ? " (ROM Personalizzato)" : " (Default)"
-            print("   • Range Displacement: \(String(format: "%.2f", MIN_CONC_DISPLACEMENT))-\(String(format: "%.2f", MAX_CONC_DISPLACEMENT))m\(romStatus)")
+            print("   • Range Displacement: \(String(format: "%.2f", romValidator.minDisplacement))-\(String(format: "%.2f", romValidator.maxDisplacement))m\(romStatus)")
             if settings.useCustomROM {
                 print("   • ROM Base: \(String(format: "%.2f", settings.customROM))m ±\(Int(settings.customROMTolerance * 100))%")
             }
@@ -658,7 +651,7 @@ extension VBTRepDetector {
         if let valley = lastValley {
             print("📉 Last Valley: \(String(format: "%.3f", valley.value))g @ idx \(valley.index)")
         }
-        if let lastRep = lastRepTime {
+        if let lastRep = refractoryValidator.lastRepTime {
             let elapsed = Date().timeIntervalSince(lastRep)
             print("⏱️  Last Rep: \(String(format: "%.2f", elapsed))s ago")
         }
@@ -713,8 +706,8 @@ extension VBTRepDetector {
         if concDur < minConcentricDurationSec() {
             issues.append("Durata breve: \(String(format: "%.2f", concDur))s < \(String(format: "%.2f", minConcentricDurationSec()))s")
         }
-        
-        if let lastRep = lastRepTime {
+
+        if let lastRep = refractoryValidator.lastRepTime {
             let refractory = now.timeIntervalSince(lastRep)
             if refractory < minRefractory {
                 issues.append("Refrattario: \(String(format: "%.2f", refractory))s < \(String(format: "%.2f", minRefractory))s")
@@ -724,10 +717,9 @@ extension VBTRepDetector {
         if useDisplacementGate, concentricSamples.count >= MIN_CONC_SAMPLES {
             let (_, _, disp) = calculatePropulsiveVelocitiesAndDisplacement(from: concentricSamples)
             if let d = disp {
-                let inRange = (MIN_CONC_DISPLACEMENT...MAX_CONC_DISPLACEMENT).contains(d)
-                if !inRange {
-                    let romType = SettingsManager.shared.useCustomROM ? "ROM personalizzato" : "Default"
-                    issues.append("Displacement \(String(format: "%.2f", d))m fuori range [\(String(format: "%.2f", MIN_CONC_DISPLACEMENT))-\(String(format: "%.2f", MAX_CONC_DISPLACEMENT))]m (\(romType))")
+                let validation = romValidator.validate(d)
+                if !validation.isValid, let errorMsg = validation.errorMessage {
+                    issues.append(errorMsg)
                 }
             }
         }

@@ -10,7 +10,7 @@
 import Foundation
 import Combine
 
-final class DistanceBasedRepDetector: ObservableObject {
+final class DistanceBasedRepDetector: ObservableObject, RepDetectorProtocol {
 
     // MARK: - Thread Safety
 
@@ -55,35 +55,31 @@ final class DistanceBasedRepDetector: ObservableObject {
         }
     }
 
-    // ROM expected (in mm)
-    var expectedROM: Double {
-        if SettingsManager.shared.useCustomROM {
-            return SettingsManager.shared.customROM * 1000.0 // converti m -> mm
-        }
-        return 500.0 // default 500mm per bench press
-    }
+    // ROM validation using shared utility (in mm)
+    private lazy var romValidator: ROMValidator = {
+        var validator = ROMValidator.fromSettings(unit: .millimeters, defaultMin: 0.20, defaultMax: 0.80)
+        // Add buffer of 10mm for tolerance
+        let minWithBuffer = max(validator.minDisplacement - 10.0, 50.0)
+        let maxWithBuffer = validator.maxDisplacement + 10.0
+        return ROMValidator(min: minWithBuffer, max: maxWithBuffer, unit: .millimeters)
+    }()
 
-    private var minROM: Double {
-        let tolerance = SettingsManager.shared.customROMTolerance
-        let calculated = expectedROM * (1.0 - tolerance)
-        // Aggiungi buffer di 10mm per evitare scarti per pochi millimetri
-        return max(calculated - 10.0, 50.0)  // Minimo assoluto 50mm
-    }
-
-    private var maxROM: Double {
-        let tolerance = SettingsManager.shared.customROMTolerance
-        return expectedROM * (1.0 + tolerance) + 10.0  // Aggiungi buffer di 10mm
-    }
+    // Refractory period validation using shared utility
+    private var refractoryValidator = RefractoryValidator(minTimeBetweenReps: 0.8)
 
     // Soglie fisse
     private let MIN_VELOCITY_THRESHOLD = 50.0  // mm/s minimo per rilevare movimento
-    private let MIN_TIME_BETWEEN_REPS: TimeInterval = 0.8
 
-    // MARK: - Callbacks
+    // MARK: - RepDetectorProtocol Conformance
 
-    enum Phase { case idle, descending, ascending, completed }
-    var onPhaseChange: ((Phase) -> Void)?
+    // Callbacks (protocol requirements)
+    var onPhaseChange: ((DetectorPhase) -> Void)?
     var onUnrack: (() -> Void)?
+
+    // Last rep time (protocol requirement, delegated to refractoryValidator)
+    var lastRepTime: Date? {
+        refractoryValidator.lastRepTime
+    }
 
     // Metriche VBT per la rep completata
     struct RepMetrics {
@@ -116,7 +112,6 @@ final class DistanceBasedRepDetector: ObservableObject {
     }
 
     private var state: CycleState = .waitingDescent
-    private var lastRepTime: Date?
 
     // Tracking fase eccentrica
     private var eccentricStartTime: Date?
@@ -148,7 +143,7 @@ final class DistanceBasedRepDetector: ObservableObject {
             samples.removeAll()
             smoothedDistances.removeAll()
             state = .waitingDescent
-            lastRepTime = nil
+            refractoryValidator.reset()
             eccentricStartTime = nil
             eccentricStartDistance = nil
             concentricSamples.removeAll()
@@ -456,15 +451,17 @@ final class DistanceBasedRepDetector: ObservableObject {
             return
         }
 
-        guard displacementMM >= minROM, displacementMM <= maxROM else {
-            print("❌ Rep scartata: ROM fuori range (\(String(format: "%.1f", displacementMM)) mm, atteso \(String(format: "%.1f", minROM))-\(String(format: "%.1f", maxROM)) mm)")
+        guard romValidator.isValid(displacementMM) else {
+            print("❌ Rep scartata: ROM fuori range (\(String(format: "%.1f", displacementMM)) mm, atteso \(String(format: "%.1f", romValidator.minDisplacement))-\(String(format: "%.1f", romValidator.maxDisplacement)) mm)")
             resetCycle()
             return
         }
 
         // Controllo refractory period
-        if let lastRep = lastRepTime, currentSample.timestamp.timeIntervalSince(lastRep) < MIN_TIME_BETWEEN_REPS {
-            print("❌ Rep scartata: troppo vicina all'ultima (\(String(format: "%.2f", currentSample.timestamp.timeIntervalSince(lastRep)))s)")
+        if !refractoryValidator.canDetectRep(at: currentSample.timestamp) {
+            if let timeSince = refractoryValidator.timeSinceLastRep(from: currentSample.timestamp) {
+                print("❌ Rep scartata: troppo vicina all'ultima (\(String(format: "%.2f", timeSince))s)")
+            }
             resetCycle()
             return
         }
@@ -483,7 +480,7 @@ final class DistanceBasedRepDetector: ObservableObject {
 
         print("✅ REP RILEVATA - ROM: \(String(format: "%.3f", metrics.displacement))m, MPV: \(String(format: "%.3f", mpv))m/s, PPV: \(String(format: "%.3f", ppv))m/s")
 
-        lastRepTime = currentSample.timestamp
+        refractoryValidator.recordRep(at: currentSample.timestamp)
         onRepDetected?(metrics)
         onPhaseChange?(.completed)
 
