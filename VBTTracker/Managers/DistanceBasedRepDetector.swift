@@ -20,35 +20,38 @@ final class DistanceBasedRepDetector: ObservableObject {
 
     var sampleRateHz: Double = 50.0
 
-    // ✅ ADAPTIVE PARAMETERS - Si adattano in base alla velocity zone selezionata dall'utente
+    // ✅ ADAPTIVE PARAMETERS - Si adattano in base al detection profile selezionato dall'utente
 
-    /// Look-ahead samples dinamico basato sulla velocity target
+    /// Look-ahead samples dinamico basato sul profilo di rilevamento
     /// - Movimenti veloci: meno campioni (più reattivo)
     /// - Movimenti lenti: più campioni (più stabile)
     var lookAheadSamples: Int {
-        let targetVelocity = SettingsManager.shared.targetMeanVelocity
+        let profile = SettingsManager.shared.detectionProfile
 
-        switch targetVelocity {
-        case 0..<0.30:   return 10  // Forza Massima: lenti, serve stabilità
-        case 0.30..<0.50: return 7  // Forza: lenti-medi
-        case 0.50..<0.75: return 5  // Forza-Velocità: medi
-        case 0.75..<1.00: return 3  // Velocità: veloci, serve reattività
-        default:          return 2  // Velocità Massima: molto veloci
+        switch profile {
+        case .maxStrength:   return 10  // Forza Massima: lenti, serve stabilità (200ms @ 50Hz)
+        case .strength:      return 7   // Forza: lenti-medi (140ms @ 50Hz)
+        case .strengthSpeed: return 5   // Forza-Velocità: medi (100ms @ 50Hz)
+        case .speed:         return 3   // Velocità: veloci, serve reattività (60ms @ 50Hz)
+        case .maxSpeed:      return 2   // Velocità Massima: molto veloci (40ms @ 50Hz)
+        case .generic, .test: return 5  // Generic/Test: valore medio
         }
     }
 
-    /// Durata minima concentrica dinamica basata sulla velocity target
+    /// Durata minima concentrica dinamica basata sul profilo di rilevamento
     /// - Movimenti veloci: durata minore (concentrica più rapida)
     /// - Movimenti lenti: durata maggiore (concentrica più lunga)
     private var minConcentricDuration: TimeInterval {
-        let targetVelocity = SettingsManager.shared.targetMeanVelocity
+        let profile = SettingsManager.shared.detectionProfile
 
-        switch targetVelocity {
-        case 0..<0.30:   return 0.5   // Forza Massima: >500ms
-        case 0.30..<0.50: return 0.4  // Forza: >400ms
-        case 0.50..<0.75: return 0.3  // Forza-Velocità: >300ms
-        case 0.75..<1.00: return 0.2  // Velocità: >200ms
-        default:          return 0.15 // Velocità Massima: >150ms
+        switch profile {
+        case .maxStrength:   return 0.5   // Forza Massima: >500ms
+        case .strength:      return 0.4   // Forza: >400ms
+        case .strengthSpeed: return 0.3   // Forza-Velocità: >300ms
+        case .speed:         return 0.2   // Velocità: >200ms
+        case .maxSpeed:      return 0.15  // Velocità Massima: >150ms
+        case .generic:       return 0.3   // Generic: valore medio
+        case .test:          return 0.1   // Test: molto permissivo
         }
     }
 
@@ -155,9 +158,9 @@ final class DistanceBasedRepDetector: ObservableObject {
             baselineDistance = nil
             idleStartTime = nil
 
-            let targetVelocity = SettingsManager.shared.targetMeanVelocity
+            let profile = SettingsManager.shared.detectionProfile
             print("🔄 DistanceBasedRepDetector reset")
-            print("⚙️ Parametri adattivi (target MPV: \(String(format: "%.2f", targetVelocity)) m/s):")
+            print("⚙️ Parametri adattivi (profilo: \(profile.displayName)):")
             print("   • lookAheadSamples: \(lookAheadSamples) (~\(Int(Double(lookAheadSamples)/sampleRateHz*1000))ms)")
             print("   • minConcentricDuration: \(String(format: "%.2f", minConcentricDuration))s")
         }
