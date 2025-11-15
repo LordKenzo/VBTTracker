@@ -21,19 +21,17 @@ final class VBTRepDetector {
     // Panca piana tipicamente ~0.30–0.50 m, lasciamo un po' di margine.
     // Se ROM personalizzato è attivo, usa quei valori invece dei default
     private var MIN_CONC_DISPLACEMENT: Double {
-        if SettingsManager.shared.useCustomROM {
-            let rom = SettingsManager.shared.customROM
-            let tolerance = SettingsManager.shared.customROMTolerance
-            return rom * (1.0 - tolerance)
+        let settings = SettingsManager.shared
+        if settings.useCustomROM {
+            return settings.customROM * (1.0 - settings.customROMTolerance)
         }
         return 0.20
     }
 
     private var MAX_CONC_DISPLACEMENT: Double {
-        if SettingsManager.shared.useCustomROM {
-            let rom = SettingsManager.shared.customROM
-            let tolerance = SettingsManager.shared.customROMTolerance
-            return rom * (1.0 + tolerance)
+        let settings = SettingsManager.shared
+        if settings.useCustomROM {
+            return settings.customROM * (1.0 + settings.customROMTolerance)
         }
         return 0.80
     }
@@ -48,8 +46,7 @@ final class VBTRepDetector {
     private var useDisplacementGate: Bool {
         // Rispetta il toggle dell'utente (controllo finale)
         // Il valore del profilo è solo un suggerimento per il default
-        let forceGate = SettingsManager.shared.forceDisplacementGate
-        return (sampleRateHz >= 60) || forceGate
+        return (sampleRateHz >= 60) || SettingsManager.shared.forceDisplacementGate
     }
     private let MIN_CONC_SAMPLES = 8
 
@@ -76,23 +73,23 @@ final class VBTRepDetector {
     private var windowSize: Int {
         max(5, SettingsManager.shared.repSmoothingWindow) // un filo più robusto
     }
-    
+
     private func minConcentricDurationSec() -> TimeInterval {
         if DEBUG_DETECTION { return 0.30 }
         let fromPattern = learnedPattern.map { max(0.50, $0.avgConcentricDuration * 0.8) } ?? max(0.50, DEFAULT_MIN_CONCENTRIC)
         let baseDuration = lowSRSafeMode ? max(0.35, fromPattern * 0.85) : fromPattern
 
         // Applica moltiplicatore del profilo
-        let profile = SettingsManager.shared.detectionProfile
-        return baseDuration * profile.durationMultiplier
+        return baseDuration * SettingsManager.shared.detectionProfile.durationMultiplier
     }
 
     private var minAmplitude: Double {
+        let settings = SettingsManager.shared
         let base: Double
         if let p = learnedPattern {
             base = max(0.18, p.dynamicMinAmplitude * 0.9)
         } else if isInWarmup {
-            base = max(0.18, SettingsManager.shared.repMinAmplitude * 0.6)
+            base = max(0.18, settings.repMinAmplitude * 0.6)
         } else if let learned = learnedMinAmplitude {
             base = max(0.18, learned * 0.7)
         } else {
@@ -101,8 +98,7 @@ final class VBTRepDetector {
         let adjusted = lowSRSafeMode ? max(0.15, base * 0.8) : base
 
         // Applica moltiplicatore del profilo
-        let profile = SettingsManager.shared.detectionProfile
-        return adjusted * profile.amplitudeMultiplier
+        return adjusted * settings.detectionProfile.amplitudeMultiplier
     }
 
     private var idleThreshold: Double {
@@ -406,9 +402,9 @@ final class VBTRepDetector {
 
         // Applica correzione velocità se abilitata E se SR è basso
         // La correzione compensa la sottostima a SR bassi (~25Hz)
-        if SettingsManager.shared.enableVelocityCorrection {
-            let profile = SettingsManager.shared.detectionProfile
-            let targetFactor = profile.velocityCorrectionFactor
+        let settings = SettingsManager.shared
+        if settings.enableVelocityCorrection {
+            let targetFactor = settings.detectionProfile.velocityCorrectionFactor
 
             // Interpolazione progressiva: correzione piena a 25Hz, nulla a 60Hz
             let minSR = 25.0  // SR minimo con correzione massima
@@ -606,9 +602,12 @@ extension VBTRepDetector {
         print("👀 Look-ahead: \(lookAheadSamples) samples (\(String(format: "%.0f", Double(lookAheadSamples)/sampleRateHz*1000))ms)")
         print("📏 Buffer: \(samples.count) samples, \(smoothedValues.count) smoothed")
         print("")
-        print("🎯 PROFILO: \(SettingsManager.shared.detectionProfile.displayName)")
-        if SettingsManager.shared.enableVelocityCorrection {
-            let targetFactor = SettingsManager.shared.detectionProfile.velocityCorrectionFactor
+        let settings = SettingsManager.shared
+        let profile = settings.detectionProfile
+
+        print("🎯 PROFILO: \(profile.displayName)")
+        if settings.enableVelocityCorrection {
+            let targetFactor = profile.velocityCorrectionFactor
 
             // Calcola fattore effettivo basato su SR (stessa logica di calculatePropulsiveVelocitiesAndDisplacement)
             let minSR = 25.0
@@ -627,7 +626,7 @@ extension VBTRepDetector {
         } else {
             print("   • Correzione Velocità: OFF")
         }
-        if SettingsManager.shared.forceDisplacementGate {
+        if settings.forceDisplacementGate {
             print("   • Displacement Gate Forzato: ON")
         }
         print("")
@@ -638,10 +637,10 @@ extension VBTRepDetector {
         print("   • Min Refractory: \(String(format: "%.2f", minRefractory))s")
         print("   • Displacement Gate: \(useDisplacementGate ? "ON" : "OFF")")
         if useDisplacementGate {
-            let romStatus = SettingsManager.shared.useCustomROM ? " (ROM Personalizzato)" : " (Default)"
+            let romStatus = settings.useCustomROM ? " (ROM Personalizzato)" : " (Default)"
             print("   • Range Displacement: \(String(format: "%.2f", MIN_CONC_DISPLACEMENT))-\(String(format: "%.2f", MAX_CONC_DISPLACEMENT))m\(romStatus)")
-            if SettingsManager.shared.useCustomROM {
-                print("   • ROM Base: \(String(format: "%.2f", SettingsManager.shared.customROM))m ±\(Int(SettingsManager.shared.customROMTolerance * 100))%")
+            if settings.useCustomROM {
+                print("   • ROM Base: \(String(format: "%.2f", settings.customROM))m ±\(Int(settings.customROMTolerance * 100))%")
             }
         }
         print("")
