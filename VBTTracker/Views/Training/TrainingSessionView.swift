@@ -121,7 +121,7 @@ struct TrainingSessionView: View {
             // Setup distance detector per Arduino
             if settings.selectedSensorType == .arduino {
                 distanceDetector.sampleRateHz = sampleRate
-                distanceDetector.lookAheadSamples = 10
+                // lookAheadSamples è ora calcolato automaticamente dal detectionProfile
 
                 // Callback quando viene rilevata una rep
                 distanceDetector.onRepDetected = { metrics in
