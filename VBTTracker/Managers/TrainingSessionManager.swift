@@ -68,16 +68,9 @@ class TrainingSessionManager: ObservableObject {
     // MARK: - Private Properties
     
     private var velocity: Double = 0.0
-    private var isMoving = false
-    private var phase: MovementPhase = .idle
-    
+
     let repDetector = VBTRepDetector()
     private let voiceFeedback = VoiceFeedbackManager()
-
-    private var inConcentricPhase = false
-    private var concentricPeakReached = false
-    private var lastRepTime: Date?
-    private var movementStartTime: Date?
     
     // Storage MPV/PPV per rep
     var repMeanPropulsiveVelocities: [Double] = []  // MPV per ogni rep
@@ -189,16 +182,6 @@ class TrainingSessionManager: ObservableObject {
         let accZ = acceleration[2]
         let accZNoGravity = accZ - 1.0  // Rimuove la gravità (1.0g) -> fermo = 0g
 
-        
-        repDetector.velocityMode = SettingsManager.shared.velocityMeasurementMode
-        // let result = repDetector.addSample(accZ: accZNoGravity, timestamp: Date())
-        
-        // 🔍 DEBUG: ogni 100 samples stampa stato
-        if repDetector.getSamples().count % 100 == 0 {
-            print("\n⏱️  Samples: \(repDetector.getSamples().count)")
-            repDetector.printDebugState()
-            print(repDetector.validateCurrentMovement())
-        }
         // 2) Passa modalità velocità al detector
         repDetector.velocityMode = SettingsManager.shared.velocityMeasurementMode
         
@@ -443,11 +426,6 @@ class TrainingSessionManager: ObservableObject {
         velocityLoss = 0.0
         repCount = 0
 
-        inConcentricPhase = false
-        concentricPeakReached = false
-        lastRepTime = nil
-        movementStartTime = nil
-        
         // Reset storage separate
         repMeanPropulsiveVelocities.removeAll()
         repPeakPropulsiveVelocities.removeAll()

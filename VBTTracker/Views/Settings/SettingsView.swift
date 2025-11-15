@@ -30,9 +30,11 @@ struct SettingsView: View {
     // ✅ CORREZIONE: @ObservedObject per aggiornamento real-time
     @ObservedObject private var patternLibrary = LearnedPatternLibrary.shared
     @ObservedObject private var exerciseManager = ExerciseManager.shared
+    @ObservedObject private var profileManager = ProfileManager.shared
 
     @Environment(\.dismiss) var dismiss
     @State private var showResetAlert = false
+    @State private var showProfileEdit = false
     
     @AppStorage("selectedDetectionAlgorithm") private var selectedAlgorithmRaw = RepDetectionAlgorithm.zAxisSimple.rawValue
     
@@ -82,7 +84,70 @@ struct SettingsView: View {
                 } footer: {
                     Text("L'algoritmo Asse Z utilizza un pattern semplice basato su picchi e valli dell'accelerazione verticale. Ottimizzato per movimenti balistici come panca, squat e stacchi.")
                 }
-                
+
+                // MARK: - User Profile Section
+                Section {
+                    Button(action: {
+                        showProfileEdit = true
+                    }) {
+                        HStack(spacing: 12) {
+                            // Profile Photo or Placeholder
+                            if let photo = profileManager.profilePhoto {
+                                Image(uiImage: photo)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: 50, height: 50)
+                                    .clipShape(Circle())
+                            } else {
+                                Image(systemName: "person.circle.fill")
+                                    .resizable()
+                                    .frame(width: 50, height: 50)
+                                    .foregroundColor(.gray)
+                            }
+
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(profileManager.profile.name.isEmpty ? "Configura Profilo" : profileManager.profile.name)
+                                    .font(.headline)
+                                    .foregroundColor(.primary)
+
+                                if profileManager.profile.isComplete {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .font(.caption)
+                                            .foregroundColor(.green)
+                                        Text("Profilo Completo")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+                                } else {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "exclamationmark.circle.fill")
+                                            .font(.caption)
+                                            .foregroundColor(.orange)
+                                        Text("Completa il profilo (\(Int(profileManager.profile.completionPercentage * 100))%)")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+                                }
+                            }
+
+                            Spacer()
+
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                } header: {
+                    Text("Profilo Utente")
+                } footer: {
+                    Text("Il tuo profilo viene utilizzato per personalizzare l'esperienza e calcolare l'indice di fatica basato sui tuoi dati VBT.")
+                }
+                .sheet(isPresented: $showProfileEdit) {
+                    ProfileEditView()
+                }
+
                 // MARK: - Categories Section
                 Section {
                     // ✅ NUOVO: Esercizio (in cima per importanza)
