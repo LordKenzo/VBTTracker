@@ -2,7 +2,7 @@
 //  BLEManager.swift
 //  VBTTracker
 //
-//  Gestione BLE per WitMotion WT901BLE
+//  Gestione BLE per WitMotion (WT901BLE e WT9011DCL)
 //
 
 import Foundation
@@ -36,9 +36,19 @@ final class BLEManager: NSObject, ObservableObject, SensorDataProvider {
     private var writeCharacteristic: CBCharacteristic?     // comandi (write / writeWithoutResponse)
     private var seenPeripherals: [UUID: CBPeripheral] = [:]
 
-    // UUID del sensore WitMotion
-    static let serviceUUID = CBUUID(string: "0000FFE5-0000-1000-8000-00805F9A34FB")
-    static let characteristicUUID = CBUUID(string: "0000FFE4-0000-1000-8000-00805F9A34FB")
+    // UUID del sensore WitMotion - Supporta due modelli diversi
+    // Modello 1 (WT901BLE): Service FFE5, Char FFE4 (notify+write combinato)
+    static let serviceUUID_FFE5 = CBUUID(string: "0000FFE5-0000-1000-8000-00805F9A34FB")
+    static let characteristicUUID_FFE4 = CBUUID(string: "0000FFE4-0000-1000-8000-00805F9A34FB")
+
+    // Modello 2 (WT9011DCL): Service FFF0, Char FFF1 (notify), FFF2 (write)
+    static let serviceUUID_FFF0 = CBUUID(string: "0000FFF0-0000-1000-8000-00805F9A34FB")
+    static let dataUUID_FFF1 = CBUUID(string: "0000FFF1-0000-1000-8000-00805F9A34FB")
+    static let controlUUID_FFF2 = CBUUID(string: "0000FFF2-0000-1000-8000-00805F9A34FB")
+
+    // Compatibilità: UUID legacy
+    static let serviceUUID = serviceUUID_FFE5
+    static let characteristicUUID = characteristicUUID_FFE4
 
     // Sample rate estimation
     private var lastPacketTime: Date?
@@ -49,6 +59,16 @@ final class BLEManager: NSObject, ObservableObject, SensorDataProvider {
     // Flag anti-concorrenza
     private var isConnecting = false
     private var autoReconnectInProgress = false
+
+    // Packet type counters (diagnostica)
+    private var packetCount_51: Int = 0  // Acceleration
+    private var packetCount_52: Int = 0  // Angular velocity
+    private var packetCount_53: Int = 0  // Angle
+    private var packetCount_61: Int = 0  // Combined
+    private var packetCount_71: Int = 0  // Register read response
+    private var packetCount_other: Int = 0
+    private var lastPacketStatsLog: Date = .distantPast
+    private var totalPacketCount: Int = 0
 
     // MARK: - Init
     override init() {
@@ -163,8 +183,9 @@ final class BLEManager: NSObject, ObservableObject, SensorDataProvider {
         statusMessage = "Scansione in corso 🔍"
         print("Inizio scansione dispositivi WitMotion")
 
+        // ✅ Scansiona per entrambi i modelli di sensore WitMotion
         central.scanForPeripherals(
-            withServices: [Self.serviceUUID],
+            withServices: [Self.serviceUUID_FFE5, Self.serviceUUID_FFF0],
             options: [CBCentralManagerScanOptionAllowDuplicatesKey: false]
         )
 
@@ -201,6 +222,16 @@ final class BLEManager: NSObject, ObservableObject, SensorDataProvider {
         packetTimestamps.removeAll()
         lastPublishedSR = nil
         srStableCounter = 0
+
+        // Reset packet counters
+        packetCount_51 = 0
+        packetCount_52 = 0
+        packetCount_53 = 0
+        packetCount_61 = 0
+        packetCount_71 = 0
+        packetCount_other = 0
+        totalPacketCount = 0
+        lastPacketStatsLog = .distantPast
     }
 
     private var lastSRNotifyTime: Date = .distantPast
@@ -362,12 +393,14 @@ extension BLEManager: CBCentralManagerDelegate {
         }
         
         peripheral.delegate = self
-        peripheral.discoverServices([Self.serviceUUID])
-        
-        // 🆕 AUTO-CONFIGURA a 200Hz dopo 1 secondo (tempo per discovery)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-            self?.configureFor200Hz()
-        }
+        // Cerca entrambi i modelli di service
+        peripheral.discoverServices([Self.serviceUUID_FFE5, Self.serviceUUID_FFF0])
+
+        // ⚠️ AUTO-CONFIGURAZIONE DISABILITATA - sensore non supporta comandi di config via BLE
+        // La configurazione deve essere fatta via USB con WitMotion software
+        // DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+        //     self?.configureFor200Hz()
+        // }
     }
 
     func centralManager(_ central: CBCentralManager,
@@ -427,35 +460,68 @@ extension BLEManager: CBPeripheralDelegate {
             return
         }
         service.characteristics?.forEach { ch in
-            print("🟢 Caratteristica: \(ch.uuid)  props=\(ch.properties)")
+            print("🟢 Caratteristica: \(ch.uuid)  props=\(ch.properties.rawValue)")
 
-            // Stream dati (notify) → tipicamente FFE4
-            if ch.uuid == Self.characteristicUUID || ch.properties.contains(.notify) {
+            // ✅ Modello WT9011DCL: FFF1 (notify) + FFF2 (write) separati
+            if ch.uuid == Self.dataUUID_FFF1 {
                 notifyCharacteristic = ch
                 dataCharacteristic = ch
-                print("✅ Attivo notifiche dati su \(ch.uuid)")
+                print("✅ [WT9011DCL] Dati su FFF1 (notify)")
                 peripheral.setNotifyValue(true, for: ch)
             }
 
-            // Comandi (write) → qualsiasi char con write* (spesso FFE9)
-            if ch.properties.contains(.write) || ch.properties.contains(.writeWithoutResponse) ||
-               ch.uuid == CBUUID(string: "0000FFE9-0000-1000-8000-00805F9A34FB") {
+            if ch.uuid == Self.controlUUID_FFF2 {
                 writeCharacteristic = ch
-                print("✍️  Useremo \(ch.uuid) per i comandi (write)")
+                print("✍️  [WT9011DCL] Comandi su FFF2 (write)")
+            }
+
+            // ✅ Modello WT901BLE: FFE4 (notify+write combinato)
+            if ch.uuid == Self.characteristicUUID_FFE4 {
+                notifyCharacteristic = ch
+                dataCharacteristic = ch
+                print("✅ [WT901BLE] Dati su FFE4 (notify)")
+                peripheral.setNotifyValue(true, for: ch)
+
+                // FFE4 serve anche per write se non c'è caratteristica dedicata
+                if writeCharacteristic == nil {
+                    writeCharacteristic = ch
+                    print("✍️  [WT901BLE] Comandi su FFE4 (stesso char)")
+                }
+            }
+
+            // Fallback generico: char con write
+            if writeCharacteristic == nil,
+               (ch.properties.contains(.write) || ch.properties.contains(.writeWithoutResponse)) {
+                writeCharacteristic = ch
+                print("✍️  [Generico] Comandi su \(ch.uuid)")
             }
         }
 
         if writeCharacteristic == nil {
             print("⚠️ Nessuna caratteristica di WRITE disponibile (non posso configurare il rate)")
+        } else {
+            print("📋 Configurazione rilevata:")
+            print("   • Notify char: \(notifyCharacteristic?.uuid.uuidString ?? "N/A")")
+            print("   • Write char: \(writeCharacteristic?.uuid.uuidString ?? "N/A")")
         }
     }
     
     // MARK: - Write helper
-    private func writeBytes(_ bytes: [UInt8]) {
+    private func writeBytes(_ bytes: [UInt8], forceResponse: Bool = false) {
         guard let p = connectedPeripheral, let ch = writeCharacteristic else {
             print("⚠️ Nessuna caratteristica di WRITE disponibile"); return
         }
-        let type: CBCharacteristicWriteType = ch.properties.contains(.writeWithoutResponse) ? .withoutResponse : .withResponse
+        // Per comandi di configurazione usa sempre .withResponse se possibile (più affidabile)
+        let type: CBCharacteristicWriteType
+        if forceResponse && ch.properties.contains(.write) {
+            type = .withResponse
+        } else if ch.properties.contains(.writeWithoutResponse) {
+            type = .withoutResponse
+        } else {
+            type = .withResponse
+        }
+
+        print("📤 Write [\(bytes.map { String(format: "%02X", $0) }.joined(separator: " "))] → \(ch.uuid) (type: \(type == .withResponse ? "withResponse" : "withoutResponse"))")
         p.writeValue(Data(bytes), for: ch, type: type)
     }
     
@@ -469,17 +535,17 @@ extension BLEManager: CBPeripheralDelegate {
     private func readBandwidth() { readRegister(0x1F) } // BANDWIDTH
 
     // MARK: - Comandi WitMotion (FF AA …)
-    private func unlock() { writeBytes([0xFF, 0xAA, 0x69, 0x88, 0xB5]) }     // sblocco config
-    private func saveConfig() { writeBytes([0xFF, 0xAA, 0x00, 0x00, 0x00]) }  // salva
+    private func unlock() { writeBytes([0xFF, 0xAA, 0x69, 0x88, 0xB5], forceResponse: true) }     // sblocco config
+    private func saveConfig() { writeBytes([0xFF, 0xAA, 0x00, 0x00, 0x00], forceResponse: true) }  // salva
 
     /// Bandwidth @0x1F: 0x00=256Hz, 0x01=188Hz, 0x02=98Hz, 0x03=42Hz, 0x04=20Hz, 0x05=10Hz, 0x06=5Hz
     private func setBandwidth(_ code: UInt8) {
-        writeBytes([0xFF, 0xAA, 0x1F, code, 0x00])
+        writeBytes([0xFF, 0xAA, 0x1F, code, 0x00], forceResponse: true)
     }
 
     /// Return Rate variante "codice" (più comune su WT901BLE): 0x0B = 200Hz, 0x09 = 100Hz, 0x06 = 10Hz…
     private func setReturnRateCode(_ code: UInt8) {
-        writeBytes([0xFF, 0xAA, 0x03, code, 0x00])
+        writeBytes([0xFF, 0xAA, 0x03, code, 0x00], forceResponse: true)
     }
 
     /// Return Rate variante "valore assoluto" (alcuni firmware accettano 200=0xC8)
@@ -487,52 +553,67 @@ extension BLEManager: CBPeripheralDelegate {
         let lo = UInt8(value & 0xFF), hi = UInt8((value >> 8) & 0xFF)
         // se il tuo firmware usasse realmente questa forma, spesso il comando è 0x03 poi lo/hi o hi/lo.
         // Qui invio lo/hi come molti esempi; se non cambia nulla restiamo al metodo "code".
-        writeBytes([0xFF, 0xAA, 0x03, lo, hi])
+        writeBytes([0xFF, 0xAA, 0x03, lo, hi], forceResponse: true)
     }
     
     /// Imposta BW alta e Return Rate 200 Hz, poi salva.
     /// Prova prima la forma "code" (0x0B = 200Hz). In fallback usa la forma "valore" (200 = 0x00C8).
     func configureFor200Hz() {
-        guard writeCharacteristic != nil else {
-            print("⚠️ Impossibile configurare: nessuna caratteristica di WRITE")
+        guard let p = connectedPeripheral,
+              let notifyCh = notifyCharacteristic,
+              writeCharacteristic != nil else {
+            print("⚠️ Impossibile configurare: caratteristiche mancanti")
             return
         }
-        
+
         print("⚙️ Inizio configurazione 200 Hz...")
-        
-        // Step 1: Unlock (50ms)
-        unlock()
-        
-        // Step 2: Set Bandwidth 256Hz (100ms)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+        print("   • Stop notifiche durante configurazione...")
+
+        // Step 0: Stop notifiche per evitare conflitti durante configurazione
+        p.setNotifyValue(false, for: notifyCh)
+
+        // Step 1: Unlock (200ms delay)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            self.unlock()
+            print("   • Unlock inviato")
+        }
+
+        // Step 2: Set Bandwidth 256Hz (400ms)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
             self.setBandwidth(0x00) // 256 Hz
             print("   • Bandwidth → 256Hz")
         }
-        
-        // Step 3: Set Return Rate 200Hz (150ms)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.10) {
+
+        // Step 3: Set Return Rate 200Hz (600ms)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
             self.setReturnRateCode(0x0B) // 200 Hz
             print("   • Return Rate → 200Hz (code 0x0B)")
         }
-        
-        // Step 4: Save config (200ms)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+
+        // Step 4: Save config (800ms)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
             self.saveConfig()
             print("   • Config salvata")
         }
-        
-        // Step 5: Verifica dopo 500ms
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.50) {
+
+        // Step 5: Riabilita notifiche (1000ms)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            p.setNotifyValue(true, for: notifyCh)
+            print("   • Notifiche riabilitate")
+        }
+
+        // Step 6: Verifica dopo 1200ms
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
             self.readBandwidth()
             self.readRate()
             print("   • Verifica configurazione...")
         }
-        
-        // Step 6: Check sample rate dopo 1.5s
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+
+        // Step 7: Check sample rate dopo 2.5s
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
             let currentSR = self.sampleRateHz ?? 0
             print("   • Sample rate rilevato: \(String(format: "%.1f", currentSR)) Hz")
-            
+
             if currentSR < 80 {
                 print("⚠️ Sample rate basso, retry con 100Hz...")
                 self.retryWith100Hz()
@@ -546,29 +627,42 @@ extension BLEManager: CBPeripheralDelegate {
 
     /// Fallback: prova 100Hz se 200Hz non funziona
     private func retryWith100Hz() {
-        unlock()
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+        guard let p = connectedPeripheral,
+              let notifyCh = notifyCharacteristic else { return }
+
+        print("   • Stop notifiche per retry...")
+        p.setNotifyValue(false, for: notifyCh)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            self.unlock()
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
             self.setBandwidth(0x00) // 256 Hz
         }
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.10) {
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
             self.setReturnRateCode(0x09) // 100 Hz
             print("   • Retry: Return Rate → 100Hz (code 0x09)")
         }
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
             self.saveConfig()
         }
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.50) {
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            p.setNotifyValue(true, for: notifyCh)
+            print("   • Notifiche riabilitate")
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
             self.readRate()
         }
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
             let currentSR = self.sampleRateHz ?? 0
             print("   • Sample rate dopo retry: \(String(format: "%.1f", currentSR)) Hz")
-            
+
             if currentSR >= 50 {
                 print("✅ Configurazione 100Hz accettata")
             } else {
@@ -599,20 +693,51 @@ extension BLEManager: CBPeripheralDelegate {
             print("⚠️ Errore lettura valore: \(error)")
             return
         }
-        guard characteristic.uuid == Self.characteristicUUID,
+        // ✅ Supporto dual-model: accetta dati da FFF1 (WT9011DCL) o FFE4 (WT901BLE)
+        guard characteristic == notifyCharacteristic,
               let data = characteristic.value else { return }
 
         let bytes = [UInt8](data)
-        if bytes.count >= 6, bytes[0] == 0x55, bytes[1] == 0x71 {
-            // Single-return packet: 55 71 <startReg> 00 <v0L> <v0H> <v1L> <v1H> ...
+        guard bytes.count >= 2, bytes[0] == 0x55 else { return }
+
+        // 📊 Conta TUTTI i tipi di pacchetto per diagnostica
+        totalPacketCount += 1
+        let packetType = bytes[1]
+
+        switch packetType {
+        case 0x51: packetCount_51 += 1  // Acceleration only
+        case 0x52: packetCount_52 += 1  // Angular velocity only
+        case 0x53: packetCount_53 += 1  // Angle only
+        case 0x61: packetCount_61 += 1  // Combined (quello che usiamo)
+        case 0x71: packetCount_71 += 1  // Register read response
+        default:   packetCount_other += 1
+        }
+
+        // Log statistiche ogni 2 secondi
+        let now = Date()
+        if now.timeIntervalSince(lastPacketStatsLog) >= 2.0 {
+            let totalRate = Double(totalPacketCount) / max(0.1, now.timeIntervalSince(lastPacketStatsLog))
+            print("📊 Packet Stats (last 2s): Total=\(totalPacketCount) (\(String(format: "%.1f", totalRate))Hz) | 0x51=\(packetCount_51) 0x52=\(packetCount_52) 0x53=\(packetCount_53) 0x61=\(packetCount_61) 0x71=\(packetCount_71) other=\(packetCount_other)")
+
+            // Reset counters
+            totalPacketCount = 0
+            packetCount_51 = 0
+            packetCount_52 = 0
+            packetCount_53 = 0
+            packetCount_61 = 0
+            packetCount_71 = 0
+            packetCount_other = 0
+            lastPacketStatsLog = now
+        }
+
+        // Handle register read responses (0x71)
+        if packetType == 0x71, bytes.count >= 6 {
             let start = bytes[2]
             let v0L = bytes[4], _ = bytes[5]
-            // let value = Int(v0H) << 8 | Int(v0L)
 
             switch start {
             case 0x03:
-                // RATE letto
-                let code = v0L // spesso basta il low-byte
+                let code = v0L
                 print("🔎 RATE register: 0x\(String(format: "%02X", code)) " + mapRate(code: code))
 
             case 0x1F:
@@ -622,12 +747,14 @@ extension BLEManager: CBPeripheralDelegate {
             default:
                 break
             }
-            return // non è un pacchetto 0x61, quindi esco qui
+            return
         }
 
-        // Pacchetto dati standard (0x55 0x61) → parsing normale
-        DispatchQueue.main.async {
-            self.parseWitMotionPacket(data)
+        // Parse pacchetto dati combinato (0x61) per l'app
+        if packetType == 0x61 {
+            DispatchQueue.main.async {
+                self.parseWitMotionPacket(data)
+            }
         }
     }
     

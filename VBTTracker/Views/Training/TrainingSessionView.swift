@@ -22,8 +22,7 @@ struct TrainingSessionView: View {
 
     @State private var dataStreamTimer: Timer?
     @State private var showEndSessionAlert = false
-    @State private var showSaveSessionAlert = false
-
+    @State private var showRepReview = false  // ✅ Nuova: mostra revisione reps
     @State private var showSummary = false
     @State private var sessionData: TrainingSessionData?
 
@@ -70,8 +69,14 @@ struct TrainingSessionView: View {
                     if settings.stopOnVelocityLoss && sessionManager.repCount > 1 {
                         velocityLossCard
                     }
-                    
-                    // 6. PULSANTI
+
+                    // 6. PATTERN ATTIVO (solo WitMotion)
+                    if settings.selectedSensorType == .witmotion && sessionManager.isRecording,
+                       sessionManager.repDetector.learnedPattern != nil {
+                        activePatternCard
+                    }
+
+                    // 7. PULSANTI
                     controlButtons
                         .padding(.top, 8)
                 }
@@ -116,7 +121,7 @@ struct TrainingSessionView: View {
             // Setup distance detector per Arduino
             if settings.selectedSensorType == .arduino {
                 distanceDetector.sampleRateHz = sampleRate
-                distanceDetector.lookAheadSamples = 10
+                // lookAheadSamples è ora calcolato automaticamente dal detectionProfile
 
                 // Callback quando viene rilevata una rep
                 distanceDetector.onRepDetected = { metrics in
@@ -177,28 +182,37 @@ struct TrainingSessionView: View {
         }
         .alert("Terminare Sessione?", isPresented: $showEndSessionAlert) {
             Button("Termina", role: .destructive) {
-                // ✅ Usa direttamente il factory method del modello
+                // ✅ Crea sessionData e mostra revisione reps
                 sessionData = TrainingSessionData.from(
                     manager: sessionManager,
                     targetZone: targetZone,
                     velocityLossThreshold: SettingsManager.shared.velocityLossThreshold
                 )
                 sessionManager.stopRecording()
-                showSaveSessionAlert = true
+                showRepReview = true  // ✅ Mostra revisione invece dell'alert
             }
         } message: {
             Text("Ripetizioni completate: \(sessionManager.repCount)/\(targetReps)")
         }
-        .alert("Salvare Sessione?", isPresented: $showSaveSessionAlert) {
-            Button("Non Salvare", role: .cancel) {
-                showSummary = true
+        .fullScreenCover(isPresented: $showRepReview) {
+            if let data = sessionData {
+                // ✅ Binding mutabile per permettere modifiche
+                RepReviewView(
+                    sessionData: Binding(
+                        get: { data },
+                        set: { sessionData = $0 }
+                    ),
+                    targetReps: targetReps,
+                    onSave: {
+                        saveSession()
+                        showSummary = true
+                    },
+                    onDiscard: {
+                        // Non salvare, ma mostra comunque il summary
+                        showSummary = true
+                    }
+                )
             }
-            Button("Salva") {
-                saveSession()
-                showSummary = true
-            }
-        } message: {
-            Text("Vuoi salvare questa sessione nello storico degli allenamenti?")
         }
         .sheet(isPresented: $showSummary) {
             if let data = sessionData {
@@ -513,7 +527,50 @@ struct TrainingSessionView: View {
             }
         }
     }
-    
+
+    // MARK: - 7. Active Pattern Badge (WitMotion only)
+
+    private var activePatternCard: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "brain.head.profile.fill")
+                .font(.title3)
+                .foregroundStyle(.purple)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Pattern Riconosciuto")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.secondary)
+
+                if sessionManager.repDetector.learnedPattern != nil {
+                    Text("Parametri adattati automaticamente")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("Nessun pattern attivo")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Spacer()
+
+            Image(systemName: "checkmark.circle.fill")
+                .font(.title3)
+                .foregroundStyle(.green)
+        }
+        .padding()
+        .background(
+            LinearGradient(
+                colors: [Color.purple.opacity(0.1), Color.purple.opacity(0.05)],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+        )
+        .cornerRadius(12)
+        .shadow(radius: 2)
+    }
+
     // MARK: - Helpers
     
     private var velocityLossColor: Color {

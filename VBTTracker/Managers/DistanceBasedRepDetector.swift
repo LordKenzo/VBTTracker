@@ -19,7 +19,41 @@ final class DistanceBasedRepDetector: ObservableObject {
     // MARK: - Configuration
 
     var sampleRateHz: Double = 50.0
-    var lookAheadSamples: Int = 10
+
+    // ✅ ADAPTIVE PARAMETERS - Si adattano in base al detection profile selezionato dall'utente
+
+    /// Look-ahead samples dinamico basato sul profilo di rilevamento
+    /// - Movimenti veloci: meno campioni (più reattivo)
+    /// - Movimenti lenti: più campioni (più stabile)
+    var lookAheadSamples: Int {
+        let profile = SettingsManager.shared.detectionProfile
+
+        switch profile {
+        case .maxStrength:   return 10  // Forza Massima: lenti, serve stabilità (200ms @ 50Hz)
+        case .strength:      return 7   // Forza: lenti-medi (140ms @ 50Hz)
+        case .strengthSpeed: return 5   // Forza-Velocità: medi (100ms @ 50Hz)
+        case .speed:         return 3   // Velocità: veloci, serve reattività (60ms @ 50Hz)
+        case .maxSpeed:      return 2   // Velocità Massima: molto veloci (40ms @ 50Hz)
+        case .generic, .test: return 5  // Generic/Test: valore medio
+        }
+    }
+
+    /// Durata minima concentrica dinamica basata sul profilo di rilevamento
+    /// - Movimenti veloci: durata minore (concentrica più rapida)
+    /// - Movimenti lenti: durata maggiore (concentrica più lunga)
+    private var minConcentricDuration: TimeInterval {
+        let profile = SettingsManager.shared.detectionProfile
+
+        switch profile {
+        case .maxStrength:   return 0.5   // Forza Massima: >500ms
+        case .strength:      return 0.4   // Forza: >400ms
+        case .strengthSpeed: return 0.3   // Forza-Velocità: >300ms
+        case .speed:         return 0.2   // Velocità: >200ms
+        case .maxSpeed:      return 0.15  // Velocità Massima: >150ms
+        case .generic:       return 0.3   // Generic: valore medio
+        case .test:          return 0.1   // Test: molto permissivo
+        }
+    }
 
     // ROM expected (in mm)
     var expectedROM: Double {
@@ -41,9 +75,8 @@ final class DistanceBasedRepDetector: ObservableObject {
         return expectedROM * (1.0 + tolerance) + 10.0  // Aggiungi buffer di 10mm
     }
 
-    // Soglie
+    // Soglie fisse
     private let MIN_VELOCITY_THRESHOLD = 50.0  // mm/s minimo per rilevare movimento
-    private let MIN_CONCENTRIC_DURATION: TimeInterval = 0.3
     private let MIN_TIME_BETWEEN_REPS: TimeInterval = 0.8
 
     // MARK: - Callbacks
@@ -124,7 +157,12 @@ final class DistanceBasedRepDetector: ObservableObject {
             concentricPeakDistance = nil
             baselineDistance = nil
             idleStartTime = nil
+
+            let profile = SettingsManager.shared.detectionProfile
             print("🔄 DistanceBasedRepDetector reset")
+            print("⚙️ Parametri adattivi (profilo: \(profile.displayName)):")
+            print("   • lookAheadSamples: \(lookAheadSamples) (~\(Int(Double(lookAheadSamples)/sampleRateHz*1000))ms)")
+            print("   • minConcentricDuration: \(String(format: "%.2f", minConcentricDuration))s")
         }
     }
 
@@ -258,7 +296,8 @@ final class DistanceBasedRepDetector: ObservableObject {
 
         switch state {
         case .waitingDescent:
-            // Attende che Arduino rilevi receding (eccentrica = allontanamento dal sensore)
+            // Attende che Arduino rilevi .receding (fase eccentrica del movimento)
+            // Con sensore a terra: bilanciere scende → distanza diminuisce → Arduino ECCENTRIC → Swift .receding
             if arduinoState == .receding {
                 state = .descending
                 eccentricStartTime = currentSample.timestamp
@@ -268,12 +307,13 @@ final class DistanceBasedRepDetector: ObservableObject {
             } else {
                 // Debug: log quando non iniziamo eccentrica
                 if arduinoState != .idle {
-                    print("🔍 waitingDescent: ricevuto \(arduinoState.displayName) (aspettavo receding)")
+                    print("🔍 waitingDescent: ricevuto \(arduinoState.displayName) (aspettavo Eccentrica)")
                 }
             }
 
         case .descending:
-            // In eccentrica, attende che Arduino rilevi approaching (concentrica = avvicinamento al sensore)
+            // In eccentrica, attende che Arduino rilevi .approaching (fase concentrica del movimento)
+            // Con sensore a terra: bilanciere sale → distanza aumenta → Arduino CONCENTRIC → Swift .approaching
             if arduinoState == .approaching {
                 state = .waitingAscent
                 concentricStartTime = currentSample.timestamp
@@ -284,7 +324,7 @@ final class DistanceBasedRepDetector: ObservableObject {
             }
 
         case .waitingAscent:
-            // Conferma l'inizio della concentrica con 3 campioni consecutivi approaching
+            // Conferma l'inizio della concentrica con 3 campioni consecutivi .approaching
             concentricSamples.append(currentSample)
 
             if arduinoState == .approaching, concentricSamples.count >= 3 {
@@ -301,14 +341,33 @@ final class DistanceBasedRepDetector: ObservableObject {
         case .ascending:
             concentricSamples.append(currentSample)
 
-            // Traccia picco massimo (distanza minima = bilanciere più vicino al sensore)
+            // Traccia picco massimo della concentrica (distanza minima = bilanciere più vicino al sensore)
+            // Con sensore a terra: il "picco" della concentrica è quando il bilanciere è più in alto (distanza minima)
             if smoothedDist < (concentricPeakDistance ?? Double.infinity) {
                 concentricPeakDistance = smoothedDist
             }
 
-            // Rileva fine concentrica quando Arduino rileva idle (fermo al top)
-            if arduinoState == .idle, concentricSamples.count >= lookAheadSamples {
-                tryCompleteRep(currentSample: currentSample)
+            // Rileva fine concentrica quando:
+            // 1. Arduino rileva idle (fermo al top - rep con pausa) OPPURE
+            // 2. Arduino inizia nuova eccentrica (touch-and-go senza pausa)
+            if concentricSamples.count >= lookAheadSamples {
+                if arduinoState == .idle {
+                    // Rep con pausa al top
+                    print("✅ Rep completata con pausa al top")
+                    tryCompleteRep(currentSample: currentSample)
+                    // resetCycle() verrà chiamato e tornerà a .waitingDescent
+                } else if arduinoState == .receding {
+                    // Touch-and-go: completa rep corrente e inizia immediatamente nuova eccentrica
+                    print("🔄 Touch-and-go: completamento rep e inizio nuova eccentrica")
+                    tryCompleteRep(currentSample: currentSample)
+                    // tryCompleteRep ha chiamato resetCycle() → state = .waitingDescent
+                    // Forza l'inizio della nuova eccentrica immediatamente
+                    state = .descending
+                    eccentricStartTime = currentSample.timestamp
+                    eccentricStartDistance = smoothedDist
+                    onPhaseChange?(.descending)
+                    print("⬇️ Nuova eccentrica iniziata (touch-and-go) a \(String(format: "%.1f", smoothedDist)) mm")
+                }
             }
         }
     }
@@ -374,24 +433,25 @@ final class DistanceBasedRepDetector: ObservableObject {
 
     private func tryCompleteRep(currentSample: DistanceSample) {
         guard let startTime = concentricStartTime,
-              let startDist = concentricStartDistance,
-              let peakDist = concentricPeakDistance,
+              let concentricStart = concentricStartDistance,
               let eccentricStart = eccentricStartTime,
-              let _ = eccentricStartDistance  // Verifica esistenza ma non serve usarla
+              let eccentricStartDist = eccentricStartDistance
         else { return }
 
         let concentricDuration = currentSample.timestamp.timeIntervalSince(startTime)
         let eccentricDuration = startTime.timeIntervalSince(eccentricStart)
         let totalDuration = concentricDuration + eccentricDuration
 
-        // Displacement (ROM) in mm: dal fondo (inizio concentrica) al top (picco concentrica)
-        // startDist = dove inizia concentrica (fondo, distanza massima)
-        // peakDist = picco concentrica (top, distanza minima)
-        let displacementMM = abs(startDist - peakDist)
+        // Displacement (ROM) in mm: differenza tra inizio eccentrica (top) e inizio concentrica (bottom)
+        // Con sensore a terra:
+        //   - eccentricStartDist = punto più alto (es: 523 mm)
+        //   - concentricStart = punto più basso (es: 135 mm)
+        //   - ROM = |523 - 135| = 388 mm ✅
+        let displacementMM = abs(eccentricStartDist - concentricStart)
 
         // Validazioni
-        guard concentricDuration >= MIN_CONCENTRIC_DURATION else {
-            print("❌ Rep scartata: durata concentrica troppo breve (\(String(format: "%.2f", concentricDuration))s)")
+        guard concentricDuration >= minConcentricDuration else {
+            print("❌ Rep scartata: durata concentrica troppo breve (\(String(format: "%.2f", concentricDuration))s < \(String(format: "%.2f", minConcentricDuration))s min)")
             resetCycle()
             return
         }
@@ -433,14 +493,19 @@ final class DistanceBasedRepDetector: ObservableObject {
     private func calculateVelocityMetrics() -> (mpv: Double, ppv: Double) {
         guard !concentricSamples.isEmpty else { return (0.0, 0.0) }
 
-        // Converti velocità da mm/s a m/s
-        let velocities = concentricSamples.map { $0.velocity / 1000.0 }
+        // Converti velocità da mm/s a m/s e usa VALORE ASSOLUTO
+        // Arduino con ORIENTATION_SIGN=+1 (sensore a terra):
+        //   - Concentrica (approaching) = velocità negativa (distanza diminuisce)
+        //   - Eccentrica (receding) = velocità positiva (distanza aumenta)
+        // Quindi nella fase concentrica le velocità sono negative, ma noi vogliamo la magnitudine!
+        let velocities = concentricSamples.map { abs($0.velocity) / 1000.0 }
 
         // PPV (Peak Propulsive Velocity) = massima velocità durante concentrica
         let ppv = velocities.max() ?? 0.0
 
-        // MPV (Mean Propulsive Velocity) = media delle velocità positive
-        let propulsiveVelocities = velocities.filter { $0 > 0 }
+        // MPV (Mean Propulsive Velocity) = media delle velocità (già tutte positive per abs)
+        // Filtriamo solo quelle significative (>0.01 m/s per evitare rumore)
+        let propulsiveVelocities = velocities.filter { $0 > 0.01 }
         let mpv = propulsiveVelocities.isEmpty ? 0.0 : propulsiveVelocities.reduce(0, +) / Double(propulsiveVelocities.count)
 
         return (mpv, ppv)

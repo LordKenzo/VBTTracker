@@ -401,7 +401,7 @@ class SettingsManager: ObservableObject {
 
 // MARK: - Supporting Types
 
-struct VelocityRanges: Codable, Equatable {
+struct VelocityRanges: Codable, Equatable, Hashable {
     var maxStrength: ClosedRange<Double>      // Forza Massima
     var strength: ClosedRange<Double>         // Forza
     var strengthSpeed: ClosedRange<Double>    // Forza-Velocità
@@ -452,12 +452,26 @@ struct VelocityRanges: Codable, Equatable {
     
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
-        
+
         try container.encode([maxStrength.lowerBound, maxStrength.upperBound], forKey: .maxStrength)
         try container.encode([strength.lowerBound, strength.upperBound], forKey: .strength)
         try container.encode([strengthSpeed.lowerBound, strengthSpeed.upperBound], forKey: .strengthSpeed)
         try container.encode([speed.lowerBound, speed.upperBound], forKey: .speed)
         try container.encode([maxSpeed.lowerBound, maxSpeed.upperBound], forKey: .maxSpeed)
+    }
+
+    // Hashable conformance (ClosedRange is not Hashable)
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(maxStrength.lowerBound)
+        hasher.combine(maxStrength.upperBound)
+        hasher.combine(strength.lowerBound)
+        hasher.combine(strength.upperBound)
+        hasher.combine(strengthSpeed.lowerBound)
+        hasher.combine(strengthSpeed.upperBound)
+        hasher.combine(speed.lowerBound)
+        hasher.combine(speed.upperBound)
+        hasher.combine(maxSpeed.lowerBound)
+        hasher.combine(maxSpeed.upperBound)
     }
 }
 

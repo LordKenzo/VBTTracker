@@ -532,15 +532,21 @@ extension VBTRepDetector {
     func recognizePatternIfPossible() {
         guard samples.count > 30 else { return }
         Task { @MainActor in
-            if let match = LearnedPatternLibrary.shared.matchPattern(for: samples) {
+            // ✅ Usa matchPatternWeighted con filtro per esercizio corrente
+            let currentExerciseId = ExerciseManager.shared.selectedExercise.id
+            if let match = LearnedPatternLibrary.shared.matchPatternWeighted(
+                for: samples,
+                loadPercentage: nil,
+                exerciseId: currentExerciseId
+            ) {
                 let features = Self.makeFeatureVector(from: samples)
                 guard !features.isEmpty else { return }
                 let dist = LearnedPatternLibrary.shared.distance(match.featureVector, features)
                 if dist < 0.35 {
-                    print("Pattern riconosciuto: \(match.label) \(match.repCount) reps")
+                    print("🎯 Pattern riconosciuto: \(match.label) (\(ExerciseManager.shared.selectedExercise.name)) - \(match.repCount) reps")
                     learnedPattern = LearnedPattern(from: match)
                 } else {
-                    print("Nessun pattern simile (dist \(String(format: "%.3f", dist)))")
+                    print("⚠️  Nessun pattern simile (dist \(String(format: "%.3f", dist)))")
                 }
             }
         }
@@ -549,6 +555,7 @@ extension VBTRepDetector {
     func savePatternSequence(
         label: String,
         repCount: Int,
+        exerciseId: UUID? = nil,
         loadPercentage: Double? = nil,
         avgMPV: Double? = nil,
         avgPPV: Double? = nil
@@ -560,10 +567,14 @@ extension VBTRepDetector {
         let features = Self.makeFeatureVector(from: samples)
         guard !features.isEmpty else { return }
 
+        // ✅ Usa esercizio corrente se non specificato
+        let finalExerciseId = exerciseId ?? ExerciseManager.shared.selectedExercise.id
+
         let new = PatternSequence(
             id: UUID(),
             date: Date(),
             label: label,
+            exerciseId: finalExerciseId,
             repCount: repCount,
             loadPercentage: loadPercentage,
             avgDuration: duration / Double(repCount),
@@ -575,7 +586,7 @@ extension VBTRepDetector {
 
         Task { @MainActor in
             LearnedPatternLibrary.shared.addPattern(new)
-            print("🧠 Pattern salvato: \(label) \(repCount) reps | MPV=\(String(format: "%.2f", new.avgMPV)) PPV=\(String(format: "%.2f", new.avgPPV))")
+            print("🧠 Pattern salvato: \(label) (\(ExerciseManager.shared.selectedExercise.name)) \(repCount) reps | MPV=\(String(format: "%.2f", new.avgMPV)) PPV=\(String(format: "%.2f", new.avgPPV))")
 
         }
     }

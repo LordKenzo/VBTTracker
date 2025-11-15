@@ -26,10 +26,11 @@ struct SettingsView: View {
     @ObservedObject var sensorManager: UnifiedSensorManager
     @ObservedObject var calibrationManager: CalibrationManager
     @ObservedObject var settings = SettingsManager.shared
-    
+
     // ✅ CORREZIONE: @ObservedObject per aggiornamento real-time
     @ObservedObject private var patternLibrary = LearnedPatternLibrary.shared
-    
+    @ObservedObject private var exerciseManager = ExerciseManager.shared
+
     @Environment(\.dismiss) var dismiss
     @State private var showResetAlert = false
     
@@ -84,6 +85,17 @@ struct SettingsView: View {
                 
                 // MARK: - Categories Section
                 Section {
+                    // ✅ NUOVO: Esercizio (in cima per importanza)
+                    NavigationLink(destination: ExerciseSelectionView()) {
+                        NavigationSettingRow(
+                            title: "Esercizio",
+                            subtitle: exerciseManager.selectedExercise.name,
+                            icon: exerciseManager.selectedExercise.icon,
+                            iconColor: exerciseManager.selectedExercise.category.color,
+                            badge: "★"
+                        )
+                    }
+
                     NavigationLink(destination: SensorSettingsView(
                         sensorManager: sensorManager,
                         calibrationManager: calibrationManager
@@ -96,29 +108,29 @@ struct SettingsView: View {
                         )
                     }
 
-                    NavigationLink(destination: LearnedPatternsView()) {
-                        NavigationSettingRow(
-                            title: "Pattern Appresi",
-                            subtitle: patternSubtitle,
-                            icon: "brain.head.profile",
-                            iconColor: .purple
-                        )
-                    }
-                    .disabled(settings.selectedSensorType != .witmotion)
-                    .opacity(settings.selectedSensorType != .witmotion ? 0.5 : 1.0)
+                    // ✅ Pattern Appresi - SOLO WitMotion (nascosto completamente per Arduino)
+                    if settings.selectedSensorType == .witmotion {
+                        NavigationLink(destination: LearnedPatternsView()) {
+                            NavigationSettingRow(
+                                title: "Pattern Appresi",
+                                subtitle: patternSubtitle,
+                                icon: "brain.head.profile",
+                                iconColor: .purple
+                            )
+                        }
 
-                    NavigationLink(destination: RecordPatternView(sensorManager: sensorManager)) {
-                        NavigationSettingRow(
-                            title: "Registra Pattern",
-                            subtitle: "Registra manualmente un nuovo pattern",
-                            icon: "waveform.badge.plus",
-                            iconColor: .red,
-                            badge: "Nuovo"
-                        )
+                        // ✅ Registra Pattern - SOLO WitMotion
+                        NavigationLink(destination: RecordPatternView(sensorManager: sensorManager)) {
+                            NavigationSettingRow(
+                                title: "Registra Pattern",
+                                subtitle: "Registra manualmente un nuovo pattern",
+                                icon: "waveform.badge.plus",
+                                iconColor: .red,
+                                badge: "Nuovo"
+                            )
+                        }
                     }
-                    .disabled(settings.selectedSensorType != .witmotion)
-                    .opacity(settings.selectedSensorType != .witmotion ? 0.5 : 1.0)
-                    
+
                     NavigationLink(destination: VelocitySettingsView()) {
                         NavigationSettingRow(
                             title: "Velocità",
@@ -127,17 +139,18 @@ struct SettingsView: View {
                             iconColor: .blue
                         )
                     }
-                    
+
+                    // ✅ Rilevamento Rep - Badge "WitMotion" quando applicabile
                     NavigationLink(destination: RepDetectionSettingsView()) {
                         NavigationSettingRow(
                             title: "Rilevamento Rep",
-                            subtitle: "Parametri algoritmo",
+                            subtitle: repDetectionSubtitle,
                             icon: "waveform.path.ecg",
                             iconColor: .purple,
-                            badge: "Avanzato"
+                            badge: repDetectionBadge
                         )
                     }
-                    
+
                     NavigationLink(destination: AudioSettingsView()) {
                         NavigationSettingRow(
                             title: "Audio",
@@ -222,7 +235,7 @@ struct SettingsView: View {
             return "Nessun sensore connesso"
         }
     }
-    
+
     private var audioSubtitle: String {
         if settings.voiceFeedbackEnabled {
             let language = settings.voiceLanguage == "it-IT" ? "Italiano" : "English"
@@ -231,7 +244,7 @@ struct SettingsView: View {
             return "Disattivato"
         }
     }
-    
+
     // ✅ CORREZIONE: Ora si aggiorna in tempo reale
     private var patternSubtitle: String {
         let count = patternLibrary.patterns.count
@@ -241,6 +254,26 @@ struct SettingsView: View {
             return "1 pattern salvato"
         } else {
             return "\(count) pattern salvati"
+        }
+    }
+
+    // ✅ NUOVO: Subtitle per Rep Detection
+    private var repDetectionSubtitle: String {
+        switch settings.selectedSensorType {
+        case .witmotion:
+            return "Parametri algoritmo WitMotion"
+        case .arduino:
+            return "Parametri algoritmo Arduino"
+        }
+    }
+
+    // ✅ NUOVO: Badge per Rep Detection
+    private var repDetectionBadge: String? {
+        switch settings.selectedSensorType {
+        case .witmotion:
+            return "Avanzato"
+        case .arduino:
+            return nil  // Nessun badge per Arduino (più semplice)
         }
     }
 }

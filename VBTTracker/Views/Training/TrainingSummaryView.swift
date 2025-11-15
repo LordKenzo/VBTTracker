@@ -492,27 +492,52 @@ struct TrainingSessionData {
     let date: Date
     let targetZone: ClosedRange<Double>
     let velocityLossThreshold: Double
-    let reps: [RepData]
-    
+    var reps: [RepData]  // ✅ Cambiato da let a var per permettere modifiche
+
     var totalReps: Int {
         reps.count
     }
-    
+
     var repsInTarget: Int {
         reps.filter { targetZone.contains($0.meanVelocity) }.count
     }
-    
+
     var velocityLoss: Double {
         guard let first = reps.first?.meanVelocity,
               let last = reps.last?.meanVelocity,
               first > 0 else { return 0 }
-        
+
         return ((first - last) / first) * 100
     }
-    
+
     var wasSuccessful: Bool {
         // Successful if completed all reps OR stopped due to VL threshold
         velocityLoss >= velocityLossThreshold || totalReps > 0
+    }
+
+    // MARK: - Mutation Methods
+
+    /// Rimuove ripetizioni agli indici specificati e ricalcola velocity loss
+    mutating func removeReps(at offsets: IndexSet) {
+        // Rimuovi le reps
+        reps.remove(atOffsets: offsets)
+
+        // Ricalcola velocity loss from first per tutte le reps rimanenti
+        // usando la nuova prima rep come baseline
+        guard let firstMPV = reps.first?.meanVelocity,
+              firstMPV > 0 else { return }
+
+        // Aggiorna velocityLossFromFirst per ogni rep rimanente
+        for index in reps.indices {
+            let vlFromFirst = ((firstMPV - reps[index].meanVelocity) / firstMPV) * 100
+            let oldRep = reps[index]
+            reps[index] = RepData(
+                id: oldRep.id,  // Mantieni lo stesso ID
+                meanVelocity: oldRep.meanVelocity,
+                peakVelocity: oldRep.peakVelocity,
+                velocityLossFromFirst: max(0, vlFromFirst)
+            )
+        }
     }
     
     // MARK: - Factory Method from TrainingSessionManager
@@ -576,10 +601,17 @@ struct TrainingSessionData {
 }
 
 struct RepData: Identifiable {
-    let id = UUID()
+    let id: UUID
     let meanVelocity: Double
     let peakVelocity: Double
     let velocityLossFromFirst: Double
+
+    init(id: UUID = UUID(), meanVelocity: Double, peakVelocity: Double, velocityLossFromFirst: Double) {
+        self.id = id
+        self.meanVelocity = meanVelocity
+        self.peakVelocity = peakVelocity
+        self.velocityLossFromFirst = velocityLossFromFirst
+    }
 }
 
 // MARK: - Preview

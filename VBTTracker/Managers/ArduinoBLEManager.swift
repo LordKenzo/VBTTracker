@@ -283,15 +283,20 @@ final class ArduinoBLEManager: NSObject, ObservableObject, DistanceSensorDataPro
 
         // Estrai stato movimento (byte 10)
         // Rev5 con ORIENTATION_SIGN = +1 (sensore a terra):
-        //   - CONCENTRIC (1) = distanza aumenta = allontanamento → .receding
-        //   - ECCENTRIC (2) = distanza diminuisce = avvicinamento → .approaching
+        //   - CONCENTRIC (1) = fase concentrica del movimento → .approaching (displayName: "Concentrica")
+        //   - ECCENTRIC (2) = fase eccentrica del movimento → .receding (displayName: "Eccentrica")
+        //
+        // Nota: i nomi .approaching/.receding sono semantici rispetto al MOVIMENTO del bilanciere,
+        // non rispetto alla geometria del sensore. Con sensore a terra:
+        //   - Concentrica: bilanciere sale (si allontana dal sensore geometricamente, ma "approaching" il completamento)
+        //   - Eccentrica: bilanciere scende (si avvicina al sensore geometricamente, ma "receding" dal completamento)
         let stateByte = bytes[10]
         let state: MovementState
         switch stateByte {
         case 1:
-            state = .receding     // CONCENTRIC con ORIENTATION_SIGN=+1 = allontanamento
+            state = .approaching  // CONCENTRIC → "Concentrica" (mappatura semantica corretta)
         case 2:
-            state = .approaching  // ECCENTRIC con ORIENTATION_SIGN=+1 = avvicinamento
+            state = .receding     // ECCENTRIC → "Eccentrica" (mappatura semantica corretta)
         default:
             state = .idle         // 0 = IDLE
         }
