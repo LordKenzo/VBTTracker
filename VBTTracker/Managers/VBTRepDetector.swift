@@ -562,7 +562,8 @@ extension VBTRepDetector {
     ) {
         guard repCount > 0 else { return }
 
-        let amp = (samples.map { $0.accZ }.max() ?? 0) - (samples.map { $0.accZ }.min() ?? 0)
+        let accZValues = samples.map { $0.accZ }
+        let amp = (accZValues.max() ?? 0) - (accZValues.min() ?? 0)
         let duration = (samples.last?.timestamp.timeIntervalSince(samples.first?.timestamp ?? Date())) ?? 0
         let features = Self.makeFeatureVector(from: samples)
         guard !features.isEmpty else { return }

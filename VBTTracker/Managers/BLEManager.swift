@@ -54,7 +54,6 @@ final class BLEManager: NSObject, ObservableObject, SensorDataProvider {
     private var lastPacketTime: Date?
     private var intervalEMA: Double?
     private let srAlpha = 0.2
-    // private var lastSRLog: Date = .distantPast
 
     // Flag anti-concorrenza
     private var isConnecting = false
@@ -398,9 +397,6 @@ extension BLEManager: CBCentralManagerDelegate {
 
         // ⚠️ AUTO-CONFIGURAZIONE DISABILITATA - sensore non supporta comandi di config via BLE
         // La configurazione deve essere fatta via USB con WitMotion software
-        // DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-        //     self?.configureFor200Hz()
-        // }
     }
 
     func centralManager(_ central: CBCentralManager,
