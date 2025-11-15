@@ -69,6 +69,16 @@
 - Build instructions
 - Glossario tecnico
 
+### 9. [Sistema Pattern Learned](./09-learned-patterns.md)
+- Pattern Recognition ML-like system
+- DTW-based template matching
+- Quando e perché usare learned patterns
+- Solo per WitMotion IMU (non Arduino)
+- Weighted scoring multi-factor
+- Exercise-specific filtering
+- UI integration e feedback visivo
+- Confronto con ML tradizionale
+
 ---
 
 ## Abstract
@@ -103,7 +113,11 @@ VBTTracker/
     ├── 02-algoritmi-rep-detection.md
     ├── 03-sfide-tecniche.md
     ├── 04-implementazione.md
-    └── 05-metriche.md
+    ├── 05-metriche.md
+    ├── 06-conclusioni.md
+    ├── 07-bibliografia.md
+    ├── 08-appendici.md
+    └── 09-learned-patterns.md
 ```
 
 ## Come Usare Questa Documentazione
