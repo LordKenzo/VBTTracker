@@ -12,6 +12,10 @@ import Foundation
 
 final class VBTRepDetector: RepDetectorProtocol {
 
+    // MARK: - Thread Safety
+
+    private let queue = DispatchQueue(label: "com.vbttracker.vbtrepdetector", qos: .userInitiated)
+
     // MARK: - Debug / Thresholds
 
     // Metti a false per soglie realistiche
@@ -60,7 +64,9 @@ final class VBTRepDetector: RepDetectorProtocol {
 
     // Last rep time (protocol requirement, delegated to refractoryValidator)
     var lastRepTime: Date? {
-        refractoryValidator.lastRepTime
+        queue.sync {
+            refractoryValidator.lastRepTime
+        }
     }
 
     // MARK: - Adaptive params
@@ -148,6 +154,12 @@ final class VBTRepDetector: RepDetectorProtocol {
     // MARK: - Public API
 
     func addSample(accZ: Double, timestamp: Date) -> RepDetectionResult {
+        return queue.sync {
+            addSampleUnsafe(accZ: accZ, timestamp: timestamp)
+        }
+    }
+
+    private func addSampleUnsafe(accZ: Double, timestamp: Date) -> RepDetectionResult {
         samples.append(AccelerationSample(timestamp: timestamp, accZ: accZ))
         if samples.count > 512 { samples.removeFirst() }
 
@@ -163,21 +175,23 @@ final class VBTRepDetector: RepDetectorProtocol {
     }
 
     func reset() {
-        samples.removeAll()
-        smoothedValues.removeAll()
-        lastPeak = nil
-        lastValley = nil
-        refractoryValidator.reset()
-        isFirstMovement = true
-        isInWarmup = true
-        repAmplitudes.removeAll()
-        learnedMinAmplitude = nil
-        currentDirection = .none
-        cycleState = .waitingDescent
-        concentricSamples.removeAll()
-        isTrackingConcentric = false
-        hasAnnouncedUnrack = false
-        unrackCooldownUntil = nil
+        queue.sync {
+            samples.removeAll()
+            smoothedValues.removeAll()
+            lastPeak = nil
+            lastValley = nil
+            refractoryValidator.reset()
+            isFirstMovement = true
+            isInWarmup = true
+            repAmplitudes.removeAll()
+            learnedMinAmplitude = nil
+            currentDirection = .none
+            cycleState = .waitingDescent
+            concentricSamples.removeAll()
+            isTrackingConcentric = false
+            hasAnnouncedUnrack = false
+            unrackCooldownUntil = nil
+        }
     }
 
     func apply(pattern: LearnedPattern) {

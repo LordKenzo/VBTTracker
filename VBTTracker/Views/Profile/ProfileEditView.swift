@@ -26,8 +26,9 @@ struct ProfileEditView: View {
     // Height/Weight pickers
     @State private var showHeightPicker = false
     @State private var showWeightPicker = false
-    private let heightRange = stride(from: 100.0, through: 250.0, by: 0.5)
-    private let weightRange = stride(from: 30.0, through: 300.0, by: 0.1)
+    // Use integer arrays to avoid floating-point imprecision
+    private let heightRange = Array(stride(from: 1000, through: 2500, by: 5)) // tenths of cm (100.0-250.0)
+    private let weightRange = Array(stride(from: 300, through: 3000, by: 1))  // tenths of kg (30.0-300.0)
 
     init() {
         // Initialize state from current profile
@@ -211,11 +212,14 @@ struct ProfileEditView: View {
             .sheet(isPresented: $showHeightPicker) {
                 NavigationStack {
                     Picker("Altezza", selection: Binding(
-                        get: { editedProfile.height ?? 170.0 },
-                        set: { editedProfile.height = $0 }
+                        get: {
+                            let currentHeight = editedProfile.height ?? 170.0
+                            return Int(currentHeight * 10.0) // Convert to tenths of cm
+                        },
+                        set: { editedProfile.height = Double($0) / 10.0 } // Convert back to cm
                     )) {
-                        ForEach(Array(heightRange), id: \.self) { height in
-                            Text(String(format: "%.1f cm", height)).tag(height)
+                        ForEach(heightRange, id: \.self) { heightTenths in
+                            Text(String(format: "%.1f cm", Double(heightTenths) / 10.0)).tag(heightTenths)
                         }
                     }
                     .pickerStyle(.wheel)
@@ -235,11 +239,14 @@ struct ProfileEditView: View {
             .sheet(isPresented: $showWeightPicker) {
                 NavigationStack {
                     Picker("Peso", selection: Binding(
-                        get: { editedProfile.weight ?? 70.0 },
-                        set: { editedProfile.weight = $0 }
+                        get: {
+                            let currentWeight = editedProfile.weight ?? 70.0
+                            return Int(currentWeight * 10.0) // Convert to tenths of kg
+                        },
+                        set: { editedProfile.weight = Double($0) / 10.0 } // Convert back to kg
                     )) {
-                        ForEach(Array(weightRange), id: \.self) { weight in
-                            Text(String(format: "%.1f kg", weight)).tag(weight)
+                        ForEach(weightRange, id: \.self) { weightTenths in
+                            Text(String(format: "%.1f kg", Double(weightTenths) / 10.0)).tag(weightTenths)
                         }
                     }
                     .pickerStyle(.wheel)

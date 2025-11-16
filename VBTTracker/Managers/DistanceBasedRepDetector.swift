@@ -88,7 +88,9 @@ final class DistanceBasedRepDetector: ObservableObject, RepDetectorProtocol {
 
     // Last rep time (protocol requirement, delegated to refractoryValidator)
     var lastRepTime: Date? {
-        refractoryValidator.lastRepTime
+        queue.sync {
+            refractoryValidator.lastRepTime
+        }
     }
 
     // Metriche VBT per la rep completata
