@@ -27,6 +27,7 @@ final class VBTRepDetector: RepDetectorProtocol {
 
     // Valori di sicurezza
     private let DEFAULT_MIN_CONCENTRIC: TimeInterval = 0.45
+    private let DEFAULT_REFRACTORY: TimeInterval = 0.80
     private let MAX_MPV = 2.5
     private let MAX_PPV = 3.0
     private let warmupReps = 3

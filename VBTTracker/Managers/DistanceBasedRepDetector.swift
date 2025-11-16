@@ -70,6 +70,16 @@ final class DistanceBasedRepDetector: ObservableObject, RepDetectorProtocol {
     // Soglie fisse
     private let MIN_VELOCITY_THRESHOLD = 50.0  // mm/s minimo per rilevare movimento
 
+    // Expected ROM (mm) - computed from validator's center point
+    var expectedROM: Double {
+        // Return the center of the ROM range (without buffer)
+        let settings = SettingsManager.shared
+        if settings.useCustomROM {
+            return settings.customROM * 1000.0 // m → mm
+        }
+        return 500.0 // default 500mm per bench press
+    }
+
     // MARK: - RepDetectorProtocol Conformance
 
     // Callbacks (protocol requirements)
