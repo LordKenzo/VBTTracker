@@ -136,10 +136,10 @@ final class LearnedPatternLibrary: ObservableObject {
         let spectralEnergy = sqrt(diffs.map { $0 * $0 }.reduce(0, +) / Double(diffs.count))
 
         return [
-            mean / 1.0,
-            std / 1.0,
+            mean,
+            std,
             range / 2.0,
-            spectralEnergy / 1.0,
+            spectralEnergy,
             Double(seq.count) / 100.0
         ]
     }

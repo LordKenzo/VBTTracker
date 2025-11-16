@@ -10,33 +10,24 @@
 
 import Foundation
 
-final class VBTRepDetector {
+final class VBTRepDetector: RepDetectorProtocol {
+
+    // MARK: - Thread Safety
+
+    private let queue = DispatchQueue(label: "com.vbttracker.vbtrepdetector", qos: .userInitiated)
 
     // MARK: - Debug / Thresholds
 
     // Metti a false per soglie realistiche
     private let DEBUG_DETECTION = false
 
-    // Spostamento (m) minimo/massimo accettato per la fase concentrica
-    // Panca piana tipicamente ~0.30–0.50 m, lasciamo un po' di margine.
-    // Se ROM personalizzato è attivo, usa quei valori invece dei default
-    private var MIN_CONC_DISPLACEMENT: Double {
-        if SettingsManager.shared.useCustomROM {
-            let rom = SettingsManager.shared.customROM
-            let tolerance = SettingsManager.shared.customROMTolerance
-            return rom * (1.0 - tolerance)
-        }
-        return 0.20
-    }
+    // ROM validation using shared utility
+    private lazy var romValidator: ROMValidator = {
+        ROMValidator.fromSettings(unit: .meters, defaultMin: 0.20, defaultMax: 0.80)
+    }()
 
-    private var MAX_CONC_DISPLACEMENT: Double {
-        if SettingsManager.shared.useCustomROM {
-            let rom = SettingsManager.shared.customROM
-            let tolerance = SettingsManager.shared.customROMTolerance
-            return rom * (1.0 + tolerance)
-        }
-        return 0.80
-    }
+    // Refractory period validation using shared utility
+    private var refractoryValidator = RefractoryValidator(minTimeBetweenReps: 0.80)
 
     // Valori di sicurezza
     private let DEFAULT_MIN_CONCENTRIC: TimeInterval = 0.45
@@ -48,8 +39,7 @@ final class VBTRepDetector {
     private var useDisplacementGate: Bool {
         // Rispetta il toggle dell'utente (controllo finale)
         // Il valore del profilo è solo un suggerimento per il default
-        let forceGate = SettingsManager.shared.forceDisplacementGate
-        return (sampleRateHz >= 60) || forceGate
+        return (sampleRateHz >= 60) || SettingsManager.shared.forceDisplacementGate
     }
     private let MIN_CONC_SAMPLES = 8
 
@@ -66,33 +56,41 @@ final class VBTRepDetector {
 
     var learnedPattern: LearnedPattern?
 
-    // Callback
-    enum Phase { case idle, descending, ascending, completed }
-    var onPhaseChange: ((Phase) -> Void)?
+    // MARK: - RepDetectorProtocol Conformance
+
+    // Callbacks (protocol requirements)
+    var onPhaseChange: ((DetectorPhase) -> Void)?
     var onUnrack: (() -> Void)?
+
+    // Last rep time (protocol requirement, delegated to refractoryValidator)
+    var lastRepTime: Date? {
+        queue.sync {
+            refractoryValidator.lastRepTime
+        }
+    }
 
     // MARK: - Adaptive params
 
     private var windowSize: Int {
         max(5, SettingsManager.shared.repSmoothingWindow) // un filo più robusto
     }
-    
+
     private func minConcentricDurationSec() -> TimeInterval {
         if DEBUG_DETECTION { return 0.30 }
         let fromPattern = learnedPattern.map { max(0.50, $0.avgConcentricDuration * 0.8) } ?? max(0.50, DEFAULT_MIN_CONCENTRIC)
         let baseDuration = lowSRSafeMode ? max(0.35, fromPattern * 0.85) : fromPattern
 
         // Applica moltiplicatore del profilo
-        let profile = SettingsManager.shared.detectionProfile
-        return baseDuration * profile.durationMultiplier
+        return baseDuration * SettingsManager.shared.detectionProfile.durationMultiplier
     }
 
     private var minAmplitude: Double {
+        let settings = SettingsManager.shared
         let base: Double
         if let p = learnedPattern {
             base = max(0.18, p.dynamicMinAmplitude * 0.9)
         } else if isInWarmup {
-            base = max(0.18, SettingsManager.shared.repMinAmplitude * 0.6)
+            base = max(0.18, settings.repMinAmplitude * 0.6)
         } else if let learned = learnedMinAmplitude {
             base = max(0.18, learned * 0.7)
         } else {
@@ -101,8 +99,7 @@ final class VBTRepDetector {
         let adjusted = lowSRSafeMode ? max(0.15, base * 0.8) : base
 
         // Applica moltiplicatore del profilo
-        let profile = SettingsManager.shared.detectionProfile
-        return adjusted * profile.amplitudeMultiplier
+        return adjusted * settings.detectionProfile.amplitudeMultiplier
     }
 
     private var idleThreshold: Double {
@@ -124,7 +121,6 @@ final class VBTRepDetector {
 
     private var lastPeak: (value: Double, index: Int, time: Date)?
     private var lastValley: (value: Double, index: Int, time: Date)?
-    private var lastRepTime: Date?
 
     private var isFirstMovement = true
     private var isInWarmup = true
@@ -158,6 +154,12 @@ final class VBTRepDetector {
     // MARK: - Public API
 
     func addSample(accZ: Double, timestamp: Date) -> RepDetectionResult {
+        return queue.sync {
+            addSampleUnsafe(accZ: accZ, timestamp: timestamp)
+        }
+    }
+
+    private func addSampleUnsafe(accZ: Double, timestamp: Date) -> RepDetectionResult {
         samples.append(AccelerationSample(timestamp: timestamp, accZ: accZ))
         if samples.count > 512 { samples.removeFirst() }
 
@@ -173,21 +175,23 @@ final class VBTRepDetector {
     }
 
     func reset() {
-        samples.removeAll()
-        smoothedValues.removeAll()
-        lastPeak = nil
-        lastValley = nil
-        lastRepTime = nil
-        isFirstMovement = true
-        isInWarmup = true
-        repAmplitudes.removeAll()
-        learnedMinAmplitude = nil
-        currentDirection = .none
-        cycleState = .waitingDescent
-        concentricSamples.removeAll()
-        isTrackingConcentric = false
-        hasAnnouncedUnrack = false
-        unrackCooldownUntil = nil
+        queue.sync {
+            samples.removeAll()
+            smoothedValues.removeAll()
+            lastPeak = nil
+            lastValley = nil
+            refractoryValidator.reset()
+            isFirstMovement = true
+            isInWarmup = true
+            repAmplitudes.removeAll()
+            learnedMinAmplitude = nil
+            currentDirection = .none
+            cycleState = .waitingDescent
+            concentricSamples.removeAll()
+            isTrackingConcentric = false
+            hasAnnouncedUnrack = false
+            unrackCooldownUntil = nil
+        }
     }
 
     func apply(pattern: LearnedPattern) {
@@ -283,7 +287,7 @@ final class VBTRepDetector {
                     let amplitude = peakT.value - valley.value
                     let concDur  = peakT.time.timeIntervalSince(valley.time)
 
-                    let refractoryOK = lastRepTime == nil || now.timeIntervalSince(lastRepTime!) >= minRefractory
+                    let refractoryOK = refractoryValidator.canDetectRep(at: now)
                     let ampOK = amplitude >= minAmplitude
                     let durOK = concDur >= minConcentricDurationSec()
 
@@ -295,9 +299,9 @@ final class VBTRepDetector {
                         mpv = clamped.0
                         ppv = clamped.1
                         if let d = disp {
-                            dispOK = (MIN_CONC_DISPLACEMENT...MAX_CONC_DISPLACEMENT).contains(d)
+                            dispOK = romValidator.isValid(d)
                             if DEBUG_DETECTION {
-                                let rangeInfo = SettingsManager.shared.useCustomROM ? " [Custom ROM: \(String(format: "%.2f", MIN_CONC_DISPLACEMENT))-\(String(format: "%.2f", MAX_CONC_DISPLACEMENT))m]" : ""
+                                let rangeInfo = SettingsManager.shared.useCustomROM ? " [Custom ROM: \(String(format: "%.2f", romValidator.minDisplacement))-\(String(format: "%.2f", romValidator.maxDisplacement))m]" : ""
                                 print("📏 disp=\(String(format: "%.2f", d)) m  gate=\(dispOK ? "OK" : "KO")\(rangeInfo)")
                             }
                         } else {
@@ -324,7 +328,7 @@ final class VBTRepDetector {
                     } else if ampOK && refractoryOK && durOK && (!useDisplacementGate || dispOK) {
                         repDetected  = true
                         duration     = concDur
-                        lastRepTime  = now
+                        refractoryValidator.recordRep(at: now)
 
                         // warmup learning
                         repAmplitudes.append(amplitude)
@@ -360,7 +364,7 @@ final class VBTRepDetector {
 
     private func maybeAnnounceUnrack(current: Double) {
         guard !hasAnnouncedUnrack,
-              lastRepTime == nil,
+              refractoryValidator.lastRepTime == nil,
               abs(current) > idleThreshold * 2 else { return }
         if let until = unrackCooldownUntil, Date() < until { return }
         onUnrack?()
@@ -406,9 +410,9 @@ final class VBTRepDetector {
 
         // Applica correzione velocità se abilitata E se SR è basso
         // La correzione compensa la sottostima a SR bassi (~25Hz)
-        if SettingsManager.shared.enableVelocityCorrection {
-            let profile = SettingsManager.shared.detectionProfile
-            let targetFactor = profile.velocityCorrectionFactor
+        let settings = SettingsManager.shared
+        if settings.enableVelocityCorrection {
+            let targetFactor = settings.detectionProfile.velocityCorrectionFactor
 
             // Interpolazione progressiva: correzione piena a 25Hz, nulla a 60Hz
             let minSR = 25.0  // SR minimo con correzione massima
@@ -562,7 +566,8 @@ extension VBTRepDetector {
     ) {
         guard repCount > 0 else { return }
 
-        let amp = (samples.map { $0.accZ }.max() ?? 0) - (samples.map { $0.accZ }.min() ?? 0)
+        let accZValues = samples.map { $0.accZ }
+        let amp = (accZValues.max() ?? 0) - (accZValues.min() ?? 0)
         let duration = (samples.last?.timestamp.timeIntervalSince(samples.first?.timestamp ?? Date())) ?? 0
         let features = Self.makeFeatureVector(from: samples)
         guard !features.isEmpty else { return }
@@ -605,9 +610,12 @@ extension VBTRepDetector {
         print("👀 Look-ahead: \(lookAheadSamples) samples (\(String(format: "%.0f", Double(lookAheadSamples)/sampleRateHz*1000))ms)")
         print("📏 Buffer: \(samples.count) samples, \(smoothedValues.count) smoothed")
         print("")
-        print("🎯 PROFILO: \(SettingsManager.shared.detectionProfile.displayName)")
-        if SettingsManager.shared.enableVelocityCorrection {
-            let targetFactor = SettingsManager.shared.detectionProfile.velocityCorrectionFactor
+        let settings = SettingsManager.shared
+        let profile = settings.detectionProfile
+
+        print("🎯 PROFILO: \(profile.displayName)")
+        if settings.enableVelocityCorrection {
+            let targetFactor = profile.velocityCorrectionFactor
 
             // Calcola fattore effettivo basato su SR (stessa logica di calculatePropulsiveVelocitiesAndDisplacement)
             let minSR = 25.0
@@ -626,7 +634,7 @@ extension VBTRepDetector {
         } else {
             print("   • Correzione Velocità: OFF")
         }
-        if SettingsManager.shared.forceDisplacementGate {
+        if settings.forceDisplacementGate {
             print("   • Displacement Gate Forzato: ON")
         }
         print("")
@@ -637,10 +645,10 @@ extension VBTRepDetector {
         print("   • Min Refractory: \(String(format: "%.2f", minRefractory))s")
         print("   • Displacement Gate: \(useDisplacementGate ? "ON" : "OFF")")
         if useDisplacementGate {
-            let romStatus = SettingsManager.shared.useCustomROM ? " (ROM Personalizzato)" : " (Default)"
-            print("   • Range Displacement: \(String(format: "%.2f", MIN_CONC_DISPLACEMENT))-\(String(format: "%.2f", MAX_CONC_DISPLACEMENT))m\(romStatus)")
-            if SettingsManager.shared.useCustomROM {
-                print("   • ROM Base: \(String(format: "%.2f", SettingsManager.shared.customROM))m ±\(Int(SettingsManager.shared.customROMTolerance * 100))%")
+            let romStatus = settings.useCustomROM ? " (ROM Personalizzato)" : " (Default)"
+            print("   • Range Displacement: \(String(format: "%.2f", romValidator.minDisplacement))-\(String(format: "%.2f", romValidator.maxDisplacement))m\(romStatus)")
+            if settings.useCustomROM {
+                print("   • ROM Base: \(String(format: "%.2f", settings.customROM))m ±\(Int(settings.customROMTolerance * 100))%")
             }
         }
         print("")
@@ -658,7 +666,7 @@ extension VBTRepDetector {
         if let valley = lastValley {
             print("📉 Last Valley: \(String(format: "%.3f", valley.value))g @ idx \(valley.index)")
         }
-        if let lastRep = lastRepTime {
+        if let lastRep = refractoryValidator.lastRepTime {
             let elapsed = Date().timeIntervalSince(lastRep)
             print("⏱️  Last Rep: \(String(format: "%.2f", elapsed))s ago")
         }
@@ -713,8 +721,8 @@ extension VBTRepDetector {
         if concDur < minConcentricDurationSec() {
             issues.append("Durata breve: \(String(format: "%.2f", concDur))s < \(String(format: "%.2f", minConcentricDurationSec()))s")
         }
-        
-        if let lastRep = lastRepTime {
+
+        if let lastRep = refractoryValidator.lastRepTime {
             let refractory = now.timeIntervalSince(lastRep)
             if refractory < minRefractory {
                 issues.append("Refrattario: \(String(format: "%.2f", refractory))s < \(String(format: "%.2f", minRefractory))s")
@@ -724,10 +732,9 @@ extension VBTRepDetector {
         if useDisplacementGate, concentricSamples.count >= MIN_CONC_SAMPLES {
             let (_, _, disp) = calculatePropulsiveVelocitiesAndDisplacement(from: concentricSamples)
             if let d = disp {
-                let inRange = (MIN_CONC_DISPLACEMENT...MAX_CONC_DISPLACEMENT).contains(d)
-                if !inRange {
-                    let romType = SettingsManager.shared.useCustomROM ? "ROM personalizzato" : "Default"
-                    issues.append("Displacement \(String(format: "%.2f", d))m fuori range [\(String(format: "%.2f", MIN_CONC_DISPLACEMENT))-\(String(format: "%.2f", MAX_CONC_DISPLACEMENT))]m (\(romType))")
+                let validation = romValidator.validate(d)
+                if !validation.isValid, let errorMsg = validation.errorMessage {
+                    issues.append(errorMsg)
                 }
             }
         }

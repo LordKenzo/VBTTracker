@@ -11,7 +11,11 @@ import Charts
 struct TrainingSummaryView: View {
     let sessionData: TrainingSessionData
     @Environment(\.dismiss) var dismiss
-    
+
+    // CSV Export state
+    @State private var showingShareSheet = false
+    @State private var csvFileURL: URL?
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -257,14 +261,17 @@ struct TrainingSummaryView: View {
     
     private var actionButtons: some View {
         VStack(spacing: 12) {
-            Button(action: {
-                // TODO: Export data
-            }) {
+            Button(action: exportToCSV) {
                 Label("Esporta Dati (CSV)", systemImage: "square.and.arrow.up")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered)
             .controlSize(.large)
+            .sheet(isPresented: $showingShareSheet) {
+                if let url = csvFileURL {
+                    ShareSheet(activityItems: [url])
+                }
+            }
             
             Button(action: {
                 dismiss()
@@ -295,6 +302,28 @@ struct TrainingSummaryView: View {
             return "⚠️ Soglia superata leggermente"
         } else {
             return "🔴 Affaticamento significativo raggiunto"
+        }
+    }
+
+    // MARK: - CSV Export
+
+    private func exportToCSV() {
+        do {
+            // Generate CSV content
+            let csvString = CSVExporter.generateCSV(from: sessionData)
+
+            // Generate filename
+            let filename = CSVExporter.generateFilename(for: sessionData.date)
+
+            // Write to temporary file
+            let fileURL = try CSVExporter.writeToTemporaryFile(csvString: csvString, filename: filename)
+
+            // Update state and show share sheet
+            csvFileURL = fileURL
+            showingShareSheet = true
+        } catch {
+            print("❌ Error exporting CSV: \(error.localizedDescription)")
+            // TODO: Show alert to user
         }
     }
 }
@@ -611,6 +640,27 @@ struct RepData: Identifiable {
         self.meanVelocity = meanVelocity
         self.peakVelocity = peakVelocity
         self.velocityLossFromFirst = velocityLossFromFirst
+    }
+}
+
+// MARK: - Share Sheet
+
+import UIKit
+
+struct ShareSheet: UIViewControllerRepresentable {
+    let activityItems: [Any]
+    let applicationActivities: [UIActivity]? = nil
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        let controller = UIActivityViewController(
+            activityItems: activityItems,
+            applicationActivities: applicationActivities
+        )
+        return controller
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {
+        // No updates needed
     }
 }
 
